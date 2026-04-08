@@ -44,16 +44,16 @@ export function ChatWindow() {
       const response = await fetchApi("/chat", {
         method: "POST",
         body: JSON.stringify({
-          message: userMessage.content,
+          query: userMessage.content,
           mode,
         }),
       });
       
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
-        content: response.message || response.response || "No response",
+        content: response.data?.answer || response.answer || response.response || "No response",
         role: "assistant",
-        sources: response.sources || [],
+        sources: response.data?.sources || response.sources || [],
       };
       
       setMessages((prev) => [...prev, assistantMessage]);

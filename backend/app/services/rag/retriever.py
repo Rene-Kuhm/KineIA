@@ -32,16 +32,16 @@ class Retriever:
 
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=query_filter,
             limit=limit,
             with_payload=True,
         )
 
         documents = []
-        for res in results:
+        for res in results.points:
             if res.payload:
                 doc = {
                     "text": res.payload.get("text", ""),
