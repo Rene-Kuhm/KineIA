@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.middleware import RateLimitMiddleware
 from app.config import settings
 from app.db.postgres import engine, Base
 from app.db.qdrant import init_qdrant_collection
@@ -34,6 +35,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(RateLimitMiddleware)
 
 
 app.include_router(chat.router, prefix="/api/v1")

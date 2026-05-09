@@ -91,6 +91,32 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     return current_user
 
 
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+) -> User | None:
+    """Get current user if authenticated, otherwise return None. Used for optional auth."""
+    if credentials is None:
+        return None
+
+    from app.db.postgres import async_session
+    from sqlalchemy import select
+
+    token = credentials.credentials
+    payload = decode_token(token)
+
+    if payload is None:
+        return None
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        return None
+
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        return user if (user and user.is_active) else None
+
+
 def require_role(allowed_roles: list[str]):
     async def role_checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role not in allowed_roles:

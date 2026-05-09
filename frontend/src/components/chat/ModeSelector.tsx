@@ -11,9 +11,9 @@ interface ModeSelectorProps {
 }
 
 const modes: { value: Mode; label: string; icon: React.ElementType }[] = [
-  { value: "student", label: "Student", icon: GraduationCap },
-  { value: "professional", label: "Professional", icon: Briefcase },
-  { value: "exam", label: "Exam", icon: ExamIcon },
+  { value: "student", label: "Estudiante", icon: GraduationCap },
+  { value: "professional", label: "Profesional", icon: Briefcase },
+  { value: "exam", label: "Examen", icon: ExamIcon },
 ];
 
 export function ModeSelector({ currentMode, onModeChange }: ModeSelectorProps) {

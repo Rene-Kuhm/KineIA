@@ -5,13 +5,14 @@ import { BookOpen, FileText, Scroll, StickyNote } from "lucide-react";
 
 type EvidenceLevel = "protocol" | "book" | "paper" | "notes";
 
-interface SourceCardProps {
+export interface SourceCardProps {
   title: string;
-  evidence_level: EvidenceLevel;
-  source_type: string;
+  source: string;
+  evidence_level: string;
+  score: number;
 }
 
-const levelConfig: Record<EvidenceLevel, { icon: React.ElementType; label: string; color: string; bg: string }> = {
+const levelConfig: Record<string, { icon: React.ElementType; label: string; color: string; bg: string }> = {
   protocol: {
     icon: Scroll,
     label: "Protocol",
@@ -38,10 +39,10 @@ const levelConfig: Record<EvidenceLevel, { icon: React.ElementType; label: strin
   },
 };
 
-export function SourceCard({ title, evidence_level, source_type }: SourceCardProps) {
+export function SourceCard({ title, evidence_level, source, score }: SourceCardProps) {
   const config = levelConfig[evidence_level] || levelConfig.notes;
   const Icon = config.icon;
-  
+
   return (
     <div
       className={cn(
@@ -50,9 +51,12 @@ export function SourceCard({ title, evidence_level, source_type }: SourceCardPro
         config.color
       )}
     >
-      <Icon className="w-3.5 h-3.5" />
+      <Icon className="w-3.5 h-3.5 shrink-0" />
       <span className="font-medium">{title}</span>
-      <span className="opacity-60 text-[10px]">{source_type}</span>
+      <span className="opacity-60 text-[10px]">{source}</span>
+      <span className="ml-auto text-[10px] opacity-50 tabular-nums">
+        {Math.round(score * 100)}%
+      </span>
     </div>
   );
 }

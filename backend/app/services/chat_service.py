@@ -1,4 +1,13 @@
+import time
+from datetime import datetime
+
+from sqlalchemy import select, delete
+
 from app.core.llm.provider import llm_provider
+from app.core.rag.reranker import rerank
+from app.db.postgres import async_session
+from app.models.conversation import Conversation
+from app.models.message import Message
 from app.services.rag.retriever import retriever
 
 
@@ -10,14 +19,21 @@ class ChatService:
         evidence_level: str | None = None,
         mode: str = "student",
         history: list[dict] | None = None,
+        user_id: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict:
         # Retrieve relevant context
         docs = retriever.search(query=query, area=area, evidence_level=evidence_level)
 
+        # Re-rank results for better relevance
+        docs = rerank(query=query, documents=docs)
+
         # Generate response
+        start_time = time.time()
         response = await llm_provider.generate_response(
             query=query, context_docs=docs, history=history, mode=mode
         )
+        response_time_ms = int((time.time() - start_time) * 1000)
 
         # Format sources
         sources = []
@@ -32,7 +48,153 @@ class ChatService:
                 }
             )
 
-        return {"answer": response, "sources": sources}
+        result = {
+            "answer": response,
+            "sources": sources,
+            "response_time_ms": response_time_ms,
+        }
+
+        # Persist conversation and messages when user is authenticated
+        if user_id:
+            async with async_session() as session:
+                # Find or create conversation
+                if conversation_id:
+                    conv_result = await session.execute(
+                        select(Conversation).where(
+                            Conversation.id == conversation_id,
+                            Conversation.user_id == user_id,
+                        )
+                    )
+                    conversation = conv_result.scalar_one_or_none()
+                    if not conversation:
+                        # If conversation_id doesn't belong to user, create new one
+                        conversation = Conversation(user_id=user_id, mode=mode)
+                        session.add(conversation)
+                        await session.flush()
+                else:
+                    conversation = Conversation(user_id=user_id, mode=mode)
+                    session.add(conversation)
+                    await session.flush()
+
+                # Auto-update title from first user message if still default
+                if conversation.title == "Nueva conversación":
+                    conversation.title = query[:100] + ("..." if len(query) > 100 else "")
+
+                # Save user message
+                user_msg = Message(
+                    conversation_id=conversation.id,
+                    role="user",
+                    content=query,
+                )
+                session.add(user_msg)
+
+                # Save assistant message
+                assistant_msg = Message(
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=response,
+                    sources=sources,
+                    response_time_ms=response_time_ms,
+                )
+                session.add(assistant_msg)
+
+                # Update conversation timestamp
+                conversation.updated_at = datetime.utcnow()
+
+                await session.commit()
+                result["conversation_id"] = conversation.id
+
+        return result
+
+    async def get_conversations(self, user_id: str) -> list[dict]:
+        """Return all conversations for a user, ordered by most recent first."""
+        async with async_session() as session:
+            result = await session.execute(
+                select(Conversation)
+                .where(Conversation.user_id == user_id)
+                .order_by(Conversation.updated_at.desc())
+            )
+            conversations = result.scalars().all()
+
+            return [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "mode": c.mode,
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                    "message_count": len(c.messages) if c.messages else 0,
+                }
+                for c in conversations
+            ]
+
+    async def get_conversation_messages(self, conversation_id: str, user_id: str) -> dict | None:
+        """Return conversation info and messages for a conversation owned by the user.
+
+        Returns None if the conversation does not exist or does not belong to the user.
+        Returns a dict with conversation metadata and messages list otherwise.
+        """
+        async with async_session() as session:
+            # Verify ownership
+            conv_result = await session.execute(
+                select(Conversation).where(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == user_id,
+                )
+            )
+            conversation = conv_result.scalar_one_or_none()
+            if not conversation:
+                return None
+
+            msg_result = await session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at.asc())
+            )
+            messages = msg_result.scalars().all()
+
+            return {
+                "conversation": {
+                    "id": conversation.id,
+                    "title": conversation.title,
+                    "mode": conversation.mode,
+                    "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
+                    "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else None,
+                },
+                "messages": [
+                    {
+                        "id": m.id,
+                        "role": m.role,
+                        "content": m.content,
+                        "sources": m.sources,
+                        "tokens_used": m.tokens_used,
+                        "response_time_ms": m.response_time_ms,
+                        "created_at": m.created_at.isoformat() if m.created_at else None,
+                    }
+                    for m in messages
+                ],
+            }
+
+    async def delete_conversation(self, conversation_id: str, user_id: str) -> bool:
+        """Delete a conversation and its messages. Returns True if deleted, False if not found."""
+        async with async_session() as session:
+            conv_result = await session.execute(
+                select(Conversation).where(
+                    Conversation.id == conversation_id,
+                    Conversation.user_id == user_id,
+                )
+            )
+            conversation = conv_result.scalar_one_or_none()
+            if not conversation:
+                return False
+
+            # Delete messages first (FK constraint)
+            await session.execute(
+                delete(Message).where(Message.conversation_id == conversation_id)
+            )
+            await session.delete(conversation)
+            await session.commit()
+            return True
 
 
 chat_service = ChatService()
