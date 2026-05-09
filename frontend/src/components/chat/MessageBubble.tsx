@@ -1,17 +1,12 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-
-export interface Source {
-  title: string;
-  evidence_level: "protocol" | "book" | "paper" | "notes";
-  source_type: string;
-}
+import { SourceCard, type SourceCardProps } from "./SourceCard";
 
 interface MessageBubbleProps {
   content: string;
   role: "user" | "assistant";
-  sources?: Source[];
+  sources?: SourceCardProps[];
 }
 
 // Simple markdown-like rendering
@@ -66,12 +61,7 @@ export function MessageBubble({ content, role, sources }: MessageBubbleProps) {
             </p>
             <div className="flex flex-wrap gap-2">
               {sources.map((source, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
-                >
-                  {source.title}
-                </span>
+                <SourceCard key={i} {...source} />
               ))}
             </div>
           </div>

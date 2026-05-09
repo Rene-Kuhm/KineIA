@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
 
     # RAG
-    embedding_model: str = "all-MiniLM-L6-v2"
-    embedding_dimensions: int = 384
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dimensions: int = 1024  # 384 for all-MiniLM-L6-v2 fallback
     chunk_size: int = 512
     chunk_overlap: int = 50
     retriever_top_k: int = 10

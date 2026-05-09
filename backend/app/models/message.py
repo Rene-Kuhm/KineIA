@@ -16,7 +16,7 @@ class Message(Base):
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user | assistant
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    sources: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sources: Mapped[list | dict | None] = mapped_column(JSON, nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
