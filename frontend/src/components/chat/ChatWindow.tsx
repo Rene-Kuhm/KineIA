@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, AlertCircle, RefreshCw, Pencil } from "lucide-react";
 import { fetchApi, fetchApiStream, APIError } from "@/lib/api";
-import { MessageBubble } from "./MessageBubble";
+import { MessageBubble, type ImageData } from "./MessageBubble";
 import { ModeSelector } from "./ModeSelector";
 import type { SourceCardProps } from "./SourceCard";
 
@@ -12,6 +12,7 @@ interface Message {
   content: string;
   role: "user" | "assistant" | "error";
   sources?: SourceCardProps[];
+  images?: ImageData[];
   retryMessage?: string;
 }
 
@@ -45,6 +46,7 @@ export function ChatWindow() {
         content: response.data?.answer || response.answer || "No recibí respuesta del agente.",
         role: "assistant",
         sources: response.data?.sources || response.sources || [],
+        images: response.data?.images || response.images || [],
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -100,6 +102,7 @@ export function ChatWindow() {
       content: "",
       role: "assistant",
       sources: [],
+      images: [],
     };
     setMessages((prev) => [...prev, placeholder]);
 
@@ -153,6 +156,16 @@ export function ChatWindow() {
                 prev.map((msg) =>
                   msg.id === assistantId
                     ? { ...msg, sources: data.sources }
+                    : msg
+                )
+              );
+            }
+
+            if (data.images !== undefined) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, images: data.images }
                     : msg
                 )
               );
@@ -227,6 +240,7 @@ export function ChatWindow() {
                 content={msg.content}
                 role={msg.role === "error" ? "assistant" : msg.role}
                 sources={msg.sources}
+                images={msg.images}
               />
               {msg.role === "error" && msg.retryMessage && (
                 <button
