@@ -59,6 +59,10 @@ ANATOMY_IMAGES = {
         "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Muscles_anterior_labeled.png/600px-Muscles_anterior_labeled.png",
         "https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Muscles_posterior_labeled.png/600px-Muscles_posterior_labeled.png",
     ],
+    "inserciones": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Muscles_anterior_labeled.png/600px-Muscles_anterior_labeled.png",
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Muscles_posterior_labeled.png/600px-Muscles_posterior_labeled.png",
+    ],
     "origen": [
         "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Muscles_anterior_labeled.png/600px-Muscles_anterior_labeled.png",
     ],
@@ -84,13 +88,19 @@ ANATOMY_IMAGES = {
 }
 
 
+def _normalize(text: str) -> str:
+    """Remove accents for accent-insensitive matching."""
+    import unicodedata
+    return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c)).lower()
+
+
 def _find_images(query: str) -> list[dict]:
-    """Find relevant anatomical images based on query keywords."""
-    query_lower = query.lower()
+    """Find relevant anatomical images based on query keywords (accent-insensitive)."""
+    query_normalized = _normalize(query)
     found = []
     seen = set()
     for keyword, urls in ANATOMY_IMAGES.items():
-        if keyword in query_lower:
+        if _normalize(keyword) in query_normalized:
             for url in urls:
                 if url not in seen:
                     seen.add(url)
