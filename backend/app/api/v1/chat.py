@@ -36,7 +36,7 @@ async def create_chat_message(
         evidence_level=request.evidence_level,
         mode=request.mode,
         history=request.history,
-        user_id=current_user.id,
+        user_id=current_user.id if current_user else None,
         conversation_id=request.conversation_id,
     )
     return {"status": "success", "data": result}

@@ -27,8 +27,8 @@ services:
 
   backend:
     build: ./backend
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://kineia:${DB_PASSWORD}@postgres:5432/kineia
       - QDRANT_URL=http://qdrant:6333
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -59,8 +59,8 @@ services:
 
   frontend:
     build: ./frontend
-    expose:
-      - "3000"
+    ports:
+      - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - WATCHPACK_POLLING=true
@@ -101,7 +101,7 @@ services:
       - "6334:6334"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:6333/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/health > /dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
