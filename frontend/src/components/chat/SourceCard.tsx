@@ -3,8 +3,6 @@
 import { cn } from "@/lib/utils";
 import { BookOpen, FileText, Scroll, StickyNote } from "lucide-react";
 
-type EvidenceLevel = "protocol" | "book" | "paper" | "notes";
-
 export interface SourceCardProps {
   title: string;
   source: string;

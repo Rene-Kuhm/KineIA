@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, AlertCircle, RefreshCw } from "lucide-react";
-import { fetchApi, APIError } from "@/lib/api";
+import { Send, Loader2, AlertCircle, RefreshCw, Pencil } from "lucide-react";
+import { fetchApi, fetchApiStream, APIError } from "@/lib/api";
 import { MessageBubble } from "./MessageBubble";
 import { ModeSelector } from "./ModeSelector";
 import type { SourceCardProps } from "./SourceCard";
@@ -21,31 +21,16 @@ export function ChatWindow() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState<Mode>("student");
   const [connectionError, setConnectionError] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, streaming]);
 
-  const handleSend = async (retryMessage?: string) => {
-    const query = retryMessage || input.trim();
-    if (!query || loading) return;
-
-    if (!retryMessage) {
-      const userMessage: Message = {
-        id: crypto.randomUUID(),
-        content: query,
-        role: "user",
-      };
-      setMessages((prev) => [...prev, userMessage]);
-      setInput("");
-    }
-
-    setLoading(true);
-    setConnectionError(false);
-
+  const fallbackToNonStreaming = async (query: string) => {
     try {
       const response = await fetchApi("/chat", {
         method: "POST",
@@ -64,7 +49,7 @@ export function ChatWindow() {
 
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
-      console.error("Chat error:", error);
+      console.error("Chat fallback error:", error);
 
       if (error instanceof APIError) {
         if (error.status === 0 || error.status === undefined) {
@@ -86,8 +71,108 @@ export function ChatWindow() {
         };
         setMessages((prev) => [...prev, errorMessage]);
       }
+    }
+  };
+
+  const handleSend = async (retryMessage?: string) => {
+    const query = retryMessage || input.trim();
+    if (!query || loading) return;
+
+    if (!retryMessage) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        content: query,
+        role: "user",
+      };
+      setMessages((prev) => [...prev, userMessage]);
+      setInput("");
+    }
+
+    setLoading(true);
+    setStreaming(true);
+    setConnectionError(false);
+
+    const assistantId = crypto.randomUUID();
+
+    // Placeholder message that gets filled as tokens arrive
+    const placeholder: Message = {
+      id: assistantId,
+      content: "",
+      role: "assistant",
+      sources: [],
+    };
+    setMessages((prev) => [...prev, placeholder]);
+
+    try {
+      const stream = await fetchApiStream("/chat/stream", {
+        method: "POST",
+        body: JSON.stringify({
+          query,
+          mode,
+        }),
+      });
+
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+
+          const dataStr = line.slice(6);
+
+          if (dataStr === "[DONE]") {
+            // Stream complete — message is already fully accumulated
+            break;
+          }
+
+          try {
+            const data = JSON.parse(dataStr);
+
+            if (data.token !== undefined) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, content: msg.content + data.token }
+                    : msg
+                )
+              );
+            }
+
+            if (data.sources !== undefined) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, sources: data.sources }
+                    : msg
+                )
+              );
+            }
+          } catch {
+            // Ignore malformed JSON lines
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("Streaming failed, falling back to non-streaming:", error);
+
+      // Remove the incomplete streaming message
+      setMessages((prev) => prev.filter((msg) => msg.id !== assistantId));
+
+      // Fall back to the non-streaming endpoint
+      await fallbackToNonStreaming(query);
     } finally {
       setLoading(false);
+      setStreaming(false);
     }
   };
 
@@ -157,8 +242,20 @@ export function ChatWindow() {
           ))
         )}
 
-        {/* Loading indicator */}
-        {loading && (
+        {/* Streaming indicator — shows while tokens are arriving */}
+        {streaming && (
+          <div className="flex justify-start">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl px-4 py-2 shadow-sm border border-slate-200 dark:border-slate-700">
+              <span className="inline-flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                <Pencil className="w-3.5 h-3.5 animate-pulse" />
+                KineIA está escribiendo...
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Spinner — only shown during non-streaming fallback */}
+        {loading && !streaming && (
           <div className="flex justify-start">
             <div className="bg-white dark:bg-slate-800 rounded-2xl px-4 py-3 shadow-sm border border-slate-200 dark:border-slate-700">
               <Loader2 className="w-5 h-5 animate-spin text-slate-400" />

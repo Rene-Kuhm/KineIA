@@ -15,7 +15,7 @@ function renderContent(text: string) {
   
   return lines.map((line, i) => {
     // Bold: **text**
-    let processed = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    const processed = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     
     return (
       <p
