@@ -10,6 +10,97 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.rag.retriever import retriever
 
+# Anatomical image map — matched by keyword in query
+ANATOMY_IMAGES = {
+    "hombro": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/4/48/Shoulder_joint_bf.svg/800px-Shoulder_joint_bf.svg.png",
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/Pectoralis_major.png/400px-Pectoralis_major.png",
+    ],
+    "deltoides": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/4/48/Shoulder_joint_bf.svg/800px-Shoulder_joint_bf.svg.png",
+    ],
+    "rodilla": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Knee_diagram_es.svg/800px-Knee_diagram_es.svg.png",
+    ],
+    "lca": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Knee_diagram_es.svg/800px-Knee_diagram_es.svg.png",
+    ],
+    "columna": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/6/64/Illu_vertebral_column-es.svg/400px-Illu_vertebral_column-es.svg.png",
+    ],
+    "cadera": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Hip_joint-es.svg/600px-Hip_joint-es.svg.png",
+    ],
+    "codo": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Elbow_es.svg/800px-Elbow_es.svg.png",
+    ],
+    "muñeca": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/Wrist_and_hand_deeper_palmar_es.svg/400px-Wrist_and_hand_deeper_palmar_es.svg.png",
+    ],
+    "mano": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/Wrist_and_hand_deeper_palmar_es.svg/400px-Wrist_and_hand_deeper_palmar_es.svg.png",
+    ],
+    "tobillo": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/b/bf/Ankle_es.svg/800px-Ankle_es.svg.png",
+    ],
+    "pie": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Blausen_0411_FootAnatomy.png/600px-Blausen_0411_FootAnatomy.png",
+    ],
+    "craneo": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Human_skull_side_simplified_%28bones%29-es.svg/400px-Human_skull_side_simplified_%28bones%29-es.svg.png",
+    ],
+    "torax": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/Thoracic_landmarks_anterior_view-es.svg/400px-Thoracic_landmarks_anterior_view-es.svg.png",
+    ],
+    "pelvis": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f3/Pelvis_diagram_es.svg/400px-Pelvis_diagram_es.svg.png",
+    ],
+    "inserción": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Muscles_anterior_labeled.png/600px-Muscles_anterior_labeled.png",
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Muscles_posterior_labeled.png/600px-Muscles_posterior_labeled.png",
+    ],
+    "origen": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Muscles_anterior_labeled.png/600px-Muscles_anterior_labeled.png",
+    ],
+    "musculos": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Muscles_anterior_labeled.png/600px-Muscles_anterior_labeled.png",
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Muscles_posterior_labeled.png/600px-Muscles_posterior_labeled.png",
+    ],
+    "brazo": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Muscles_anterior_labeled.png/600px-Muscles_anterior_labeled.png",
+    ],
+    "pierna": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/Muscles_posterior_labeled.png/600px-Muscles_posterior_labeled.png",
+    ],
+    "corazon": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Heart_anterior_exterior_es.svg/600px-Heart_anterior_exterior_es.svg.png",
+    ],
+    "pulmones": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Lungs_diagram_detailed-es.svg/600px-Lungs_diagram_detailed-es.svg.png",
+    ],
+    "medula": [
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Spinal_cord_diagram-es.svg/400px-Spinal_cord_diagram-es.svg.png",
+    ],
+}
+
+
+def _find_images(query: str) -> list[dict]:
+    """Find relevant anatomical images based on query keywords."""
+    query_lower = query.lower()
+    found = []
+    seen = set()
+    for keyword, urls in ANATOMY_IMAGES.items():
+        if keyword in query_lower:
+            for url in urls:
+                if url not in seen:
+                    seen.add(url)
+                    found.append({
+                        "url": url,
+                        "label": keyword.capitalize(),
+                        "source": "Wikimedia Commons (CC BY-SA)",
+                    })
+    return found[:4]  # Max 4 images per response
+
 
 class ChatService:
     async def chat(
@@ -58,6 +149,7 @@ class ChatService:
         result = {
             "answer": response,
             "sources": sources,
+            "images": _find_images(query),
             "response_time_ms": response_time_ms,
         }
 
