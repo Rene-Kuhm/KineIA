@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_api_key: str = ""
     groq_api_key: str = ""
+    deepseek_api_key: str = ""
     ollama_base_url: str = "http://ollama:11434"
-    llm_provider: str = "groq"  # anthropic, google, groq, ollama
+    llm_provider: str = "deepseek"  # anthropic, google, groq, deepseek, ollama
 
     # Auth
     jwt_secret: str = "changeme_jwt_secret_at_least_32_chars"
