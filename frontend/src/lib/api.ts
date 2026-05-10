@@ -20,6 +20,9 @@ export class APIError extends Error {
     if (status === 401) {
       return "Tu sesión expiró. Por favor iniciá sesión de nuevo.";
     }
+    if (status === 403) {
+      return "No tenés permisos para acceder a este recurso.";
+    }
     if (status === 429) {
       return "Has hecho muchas consultas. Esperá un minuto antes de la próxima.";
     }
@@ -30,19 +33,37 @@ export class APIError extends Error {
   }
 }
 
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem("kineia_token");
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
+
+  const isFormData = options.body instanceof FormData;
+  const token = getAuthToken();
+
+  const headers: Record<string, string> = {
+    ...(!isFormData && { 'Content-Type': 'application/json' }),
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   let response: Response;
   try {
     response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
     });
-  } catch (error) {
+  } catch {
     throw new APIError(0, "Error de conexión");
   }
 
@@ -58,4 +79,46 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   }
 
   return response.json();
+}
+
+export async function fetchApiStream(endpoint: string, options: RequestInit = {}): Promise<ReadableStream<Uint8Array>> {
+  const url = `${API_BASE_URL}${endpoint}`;
+
+  const token = getAuthToken();
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+    });
+  } catch {
+    throw new APIError(0, "Error de conexión");
+  }
+
+  if (!response.ok) {
+    let detail = "Error del servidor";
+    try {
+      const errorBody = await response.json();
+      detail = errorBody.detail || errorBody.message || detail;
+    } catch {
+      // Response body might not be JSON
+    }
+    throw new APIError(response.status, detail);
+  }
+
+  if (!response.body) {
+    throw new APIError(0, "El servidor no devolvió un stream de respuesta");
+  }
+
+  return response.body;
 }
