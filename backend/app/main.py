@@ -7,7 +7,7 @@ from app.api.middleware import RateLimitMiddleware
 from app.config import settings
 from app.db.postgres import engine, Base
 from app.db.qdrant import init_qdrant_collection
-from app.api.v1 import chat, search, auth, knowledge
+from app.api.v1 import chat, search, auth, knowledge, images
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app.include_router(chat.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
+app.include_router(images.router, prefix="/api/v1")
 
 
 @app.get("/health")

@@ -21,13 +21,11 @@ class Retriever:
         must_conditions = []
         if area:
             must_conditions.append(
-                FieldCondition(key="metadata.area", match=MatchValue(value=area))
+                FieldCondition(key="area", match=MatchValue(value=area))
             )
         if evidence_level:
             must_conditions.append(
-                FieldCondition(
-                    key="metadata.evidence_level", match=MatchValue(value=evidence_level)
-                )
+                FieldCondition(key="evidence_level", match=MatchValue(value=evidence_level))
             )
 
         query_filter = Filter(must=must_conditions) if must_conditions else None
@@ -43,9 +41,20 @@ class Retriever:
         documents = []
         for res in results.points:
             if res.payload:
+                # Payload fields are at top level (title, source_type, area, etc.)
+                metadata = {
+                    "title": res.payload.get("title", "Desconocido"),
+                    "source": res.payload.get("source_file", res.payload.get("file_name", "Desconocido")),
+                    "source_type": res.payload.get("source_type", "unknown"),
+                    "area": res.payload.get("area", "general"),
+                    "evidence_level": res.payload.get("evidence_level", "unknown"),
+                    "author": res.payload.get("author", ""),
+                    "year": res.payload.get("year", 0),
+                    "university": res.payload.get("university", ""),
+                }
                 doc = {
                     "text": res.payload.get("text", ""),
-                    "metadata": res.payload.get("metadata", {}),
+                    "metadata": metadata,
                     "score": res.score,
                 }
                 documents.append(doc)
