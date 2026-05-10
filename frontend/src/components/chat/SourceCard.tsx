@@ -10,51 +10,26 @@ export interface SourceCardProps {
   score: number;
 }
 
-const levelConfig: Record<string, { icon: React.ElementType; label: string; color: string; bg: string }> = {
-  protocol: {
-    icon: Scroll,
-    label: "Protocol",
-    color: "text-emerald-700 dark:text-emerald-400",
-    bg: "bg-emerald-100 dark:bg-emerald-900/30",
-  },
-  book: {
-    icon: BookOpen,
-    label: "Book",
-    color: "text-blue-700 dark:text-blue-400",
-    bg: "bg-blue-100 dark:bg-blue-900/30",
-  },
-  paper: {
-    icon: FileText,
-    label: "Paper",
-    color: "text-amber-700 dark:text-amber-400",
-    bg: "bg-amber-100 dark:bg-amber-900/30",
-  },
-  notes: {
-    icon: StickyNote,
-    label: "Notes",
-    color: "text-orange-700 dark:text-orange-400",
-    bg: "bg-orange-100 dark:bg-orange-900/30",
-  },
+const levelConfig: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
+  protocol: { icon: Scroll, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-900/20" },
+  book: { icon: BookOpen, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-900/20" },
+  paper: { icon: FileText, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-900/20" },
+  notes: { icon: StickyNote, color: "text-slate-500", bg: "bg-slate-50 dark:bg-slate-800" },
 };
 
-export function SourceCard({ title, evidence_level, source, score }: SourceCardProps) {
+export function SourceCard({ title, evidence_level, score }: SourceCardProps) {
   const config = levelConfig[evidence_level] || levelConfig.notes;
   const Icon = config.icon;
 
   return (
-    <div
+    <span
       className={cn(
-        "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs",
-        config.bg,
-        config.color
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px]",
+        config.bg, config.color
       )}
     >
-      <Icon className="w-3.5 h-3.5 shrink-0" />
-      <span className="font-medium">{title}</span>
-      <span className="opacity-60 text-[10px]">{source}</span>
-      <span className="ml-auto text-[10px] opacity-50 tabular-nums">
-        {Math.round(score * 100)}%
-      </span>
-    </div>
+      <Icon className="w-3 h-3 shrink-0" />
+      <span className="truncate max-w-[120px]">{title}</span>
+    </span>
   );
 }
