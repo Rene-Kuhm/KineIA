@@ -30,9 +30,16 @@ class ChatService:
 
         # Generate response
         start_time = time.time()
-        response = await llm_provider.generate_response(
-            query=query, context_docs=docs, history=history, mode=mode
-        )
+        try:
+            response = await llm_provider.generate_response(
+                query=query, context_docs=docs, history=history, mode=mode
+            )
+        except Exception as e:
+            response = (
+                "⚠️ No pude generar una respuesta porque el servicio de IA no está disponible.\n\n"
+                f"Error: {str(e)}\n\n"
+                "Verificá que la API key (GROQ_API_KEY) esté configurada correctamente en el archivo .env"
+            )
         response_time_ms = int((time.time() - start_time) * 1000)
 
         # Format sources
