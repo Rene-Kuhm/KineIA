@@ -5,10 +5,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from app.config import settings
 from app.core.auth.dependencies import require_role
 from app.core.ingestion.pipeline import ingest_file
 from app.db.qdrant import qdrant_client
-from app.config import settings
 from app.models.user import User
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -74,13 +74,14 @@ async def knowledge_stats(
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
-    area: str = "general",
-    source_type: str = "notes",
-    evidence_level: str = "notes",
+    area: str | None = None,
+    source_type: str | None = None,
+    evidence_level: str | None = None,
     title: str | None = None,
     university: str | None = None,
     author: str | None = None,
     year: int | None = None,
+    source_key: str | None = None,
     current_user: User = Depends(require_role(["admin"])),
 ):
     """Ingest a document file into the knowledge base.
@@ -90,11 +91,15 @@ async def ingest_document(
     """
     # Validate file extension
     allowed_extensions = {".pdf", ".txt", ".md", ".markdown"}
-    suffix = Path(file.filename or "unknown").suffix.lower()
+    original_filename = (file.filename or "unknown").replace("\\", "/").rsplit("/", 1)[-1]
+    suffix = Path(original_filename).suffix.lower()
     if suffix not in allowed_extensions:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Tipo de archivo no soportado: {suffix}. Usar: {', '.join(sorted(allowed_extensions))}",
+            detail=(
+                f"Tipo de archivo no soportado: {suffix}. "
+                f"Usar: {', '.join(sorted(allowed_extensions))}"
+            ),
         )
 
     # Save uploaded file to a temp location
@@ -116,10 +121,18 @@ async def ingest_document(
     try:
         # Build metadata override
         metadata = {
-            "source_type": source_type,
-            "area": area,
-            "evidence_level": evidence_level,
+            "original_source_name": original_filename,
+            "original_source_path": original_filename,
+            "identity_scope": "upload",
         }
+        if source_key:
+            metadata["source_key"] = source_key
+        if source_type:
+            metadata["source_type"] = source_type
+        if area:
+            metadata["area"] = area
+        if evidence_level:
+            metadata["evidence_level"] = evidence_level
         if title:
             metadata["title"] = title
         if university:
@@ -130,6 +143,7 @@ async def ingest_document(
             metadata["year"] = year
 
         result = ingest_file(tmp_path, metadata_override=metadata)
+        result["file"] = original_filename
 
         return {"status": "success", "data": result}
     except ValueError as e:

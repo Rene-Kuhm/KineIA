@@ -1,7 +1,8 @@
-from qdrant_client.models import Filter, FieldCondition, MatchValue
-from app.db.qdrant import get_qdrant
+from qdrant_client.models import FieldCondition, Filter, MatchValue
+
 from app.config import settings
 from app.core.ingestion.embedder import generate_embedding
+from app.db.qdrant import get_qdrant
 
 
 class Retriever:
@@ -41,17 +42,26 @@ class Retriever:
         documents = []
         for res in results.points:
             if res.payload:
-                # Payload fields are at top level (title, source_type, area, etc.)
+                metadata_fields = (
+                    "title", "source_id", "source_version", "source_version_id",
+                    "content_hash", "original_source_name",
+                    "original_source_path", "url", "doi", "isbn", "edition", "publisher",
+                    "license", "rights", "author", "year", "publication_date",
+                    "acquisition_date", "reviewer", "review_date", "review_due_date",
+                    "evidence_level", "area", "population", "source_type", "university",
+                )
                 metadata = {
-                    "title": res.payload.get("title", "Desconocido"),
-                    "source": res.payload.get("source_file", res.payload.get("file_name", "Desconocido")),
-                    "source_type": res.payload.get("source_type", "unknown"),
-                    "area": res.payload.get("area", "general"),
-                    "evidence_level": res.payload.get("evidence_level", "unknown"),
-                    "author": res.payload.get("author", ""),
-                    "year": res.payload.get("year", 0),
-                    "university": res.payload.get("university", ""),
+                    key: res.payload[key]
+                    for key in metadata_fields
+                    if key in res.payload and res.payload[key] is not None
                 }
+                source = (
+                    res.payload.get("original_source_path")
+                    or res.payload.get("source_file")
+                    or res.payload.get("file_name")
+                )
+                if source:
+                    metadata["source"] = source
                 doc = {
                     "text": res.payload.get("text", ""),
                     "metadata": metadata,

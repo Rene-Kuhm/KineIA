@@ -1,7 +1,15 @@
+import hashlib
 import uuid
 from pathlib import Path
 
-from qdrant_client.models import PointStruct
+from qdrant_client.models import (
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    HasIdCondition,
+    MatchValue,
+    PointStruct,
+)
 
 from app.config import settings
 from app.core.ingestion.chunker import chunk_text
@@ -9,6 +17,7 @@ from app.core.ingestion.embedder import generate_embeddings
 from app.core.ingestion.extractors.markdown import extract_markdown
 from app.core.ingestion.extractors.pdf import extract_pdf
 from app.core.ingestion.extractors.text import extract_text
+from app.core.ingestion.provenance import SourceProvenance
 from app.db.qdrant import qdrant_client
 
 EXTRACTORS = {
@@ -17,6 +26,12 @@ EXTRACTORS = {
     ".pdf": extract_pdf,
     ".txt": extract_text,
 }
+
+
+def _original_source_path(path: Path) -> str:
+    resolved = path.resolve()
+    repository = next((parent for parent in resolved.parents if (parent / ".git").exists()), None)
+    return resolved.relative_to(repository).as_posix() if repository else str(path)
 
 
 def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
@@ -35,6 +50,10 @@ def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
     if metadata_override:
         file_metadata.update(metadata_override)
 
+    file_metadata.setdefault("original_source_name", extracted.get("file_name", path.name))
+    file_metadata.setdefault("original_source_path", _original_source_path(path))
+    provenance = SourceProvenance.from_content(text, file_metadata)
+
     # 2. Chunk
     chunks = chunk_text(
         text,
@@ -52,34 +71,58 @@ def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
     # 4. Build points for Qdrant
     points = []
     for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-        point_id = str(uuid.uuid4())
-        payload = {
+        chunk_hash = hashlib.sha256(chunk["text"].encode("utf-8")).hexdigest()
+        point_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"kineia:{provenance.source_version_id}:{i}:{chunk_hash}",
+            )
+        )
+        payload = provenance.payload() | {
             "text": chunk["text"],
             "header": chunk.get("header", ""),
             "chunk_index": i,
-            "source_file": str(path),
-            "file_name": path.name,
+            "source_file": provenance.original_source_path,
+            "file_name": provenance.original_source_name,
             "title": file_metadata.get("title", path.stem),
-            "source_type": file_metadata.get("source_type", "notes"),
-            "area": file_metadata.get("area", "general"),
-            "university": file_metadata.get("university", ""),
-            "author": file_metadata.get("author", ""),
-            "year": file_metadata.get("year", 0),
-            "evidence_level": file_metadata.get("evidence_level", "notes"),
         }
+        if file_metadata.get("university"):
+            payload["university"] = file_metadata["university"]
         points.append(PointStruct(id=point_id, vector=embedding, payload=payload))
 
     # 5. Upsert to Qdrant
     qdrant_client.upsert(
         collection_name=settings.qdrant_collection,
         points=points,
+        wait=True,
+    )
+    qdrant_client.delete(
+        collection_name=settings.qdrant_collection,
+        points_selector=FilterSelector(
+            filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="source_id",
+                        match=MatchValue(value=provenance.source_id),
+                    )
+                ],
+                must_not=[
+                    HasIdCondition(has_id=[point.id for point in points])
+                ],
+            )
+        ),
+        wait=True,
     )
 
     return {
         "status": "success",
         "chunks": len(chunks),
-        "file": file_path,
+        "file": provenance.original_source_path,
         "title": file_metadata.get("title", path.stem),
+        "source_id": provenance.source_id,
+        "source_version": provenance.source_version,
+        "source_version_id": provenance.source_version_id,
+        "content_hash": provenance.content_hash,
     }
 
 
