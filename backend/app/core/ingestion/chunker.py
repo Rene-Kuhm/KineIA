@@ -16,8 +16,15 @@ def chunk_text(
 
     for section in sections:
         # Detect header
-        header_match = re.match(r"^(#{1,4}\s+.+)\n", section)
+        header_match = re.match(r"^(#{1,4}\s+.+)(?:\n|$)", section)
         if header_match:
+            if current_chunk:
+                chunks.append({
+                    "text": current_chunk.strip(),
+                    "header": current_header,
+                    "word_count": len(current_chunk.split()),
+                })
+                current_chunk = ""
             current_header = header_match.group(1).strip()
 
         paragraphs = section.split("\n\n")

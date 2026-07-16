@@ -35,10 +35,38 @@ class TestChunkText:
             "Contenido del segundo capítulo."
         )
         result = chunk_text(text, chunk_size=50, chunk_overlap=0)
-        assert len(result) >= 2
-        # Headers should be preserved
-        headers = [chunk.get("header", "") for chunk in result]
-        assert any("# Capítulo 1" in h for h in headers if h)
+        assert [chunk["header"] for chunk in result] == [
+            "# Capítulo 1",
+            "## Sección 1.1",
+            "# Capítulo 2",
+        ]
+        assert "Contenido del capítulo uno" in result[0]["text"]
+        assert "subsección con más contenido" in result[1]["text"]
+        assert "Contenido del segundo capítulo" in result[2]["text"]
+
+    def test_header_only_document_without_final_newline(self):
+        result = chunk_text("# Encabezado final", chunk_size=50, chunk_overlap=0)
+        assert result == [{
+            "text": "# Encabezado final",
+            "header": "# Encabezado final",
+            "word_count": 3,
+        }]
+
+    def test_final_header_only_section_keeps_its_header(self):
+        result = chunk_text("# Primera\n\nContenido.\n\n# Final", chunk_size=50, chunk_overlap=0)
+        assert [(chunk["header"], chunk["text"]) for chunk in result] == [
+            ("# Primera", "# Primera\n\nContenido."),
+            ("# Final", "# Final"),
+        ]
+
+    def test_consecutive_headers_without_blank_line_keep_ownership(self):
+        result = chunk_text(
+            "# Principal\n## Subsección\nContenido.", chunk_size=50, chunk_overlap=0
+        )
+        assert [(chunk["header"], chunk["text"]) for chunk in result] == [
+            ("# Principal", "# Principal"),
+            ("## Subsección", "## Subsección\nContenido."),
+        ]
 
     def test_empty_text(self):
         result = chunk_text("", chunk_size=100, chunk_overlap=10)
