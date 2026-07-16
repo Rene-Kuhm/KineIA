@@ -1,5 +1,5 @@
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -50,8 +50,9 @@ class TestAuthService:
         mock_result.scalar_one_or_none.return_value = mock_user
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        from app.services.auth_service import auth_service
         from fastapi import HTTPException
+
+        from app.services.auth_service import auth_service
 
         with pytest.raises(HTTPException) as exc_info:
             await auth_service.register(
@@ -66,8 +67,8 @@ class TestAuthService:
     @pytest.mark.asyncio
     async def test_login_valid_credentials(self, mock_session):
         """Login with valid credentials should return a token."""
-        from app.services.auth_service import auth_service
         from app.core.auth.dependencies import get_password_hash
+        from app.services.auth_service import auth_service
 
         # Create a mock user with hashed password
         mock_user = MagicMock()
@@ -94,16 +95,18 @@ class TestAuthService:
     @pytest.mark.asyncio
     async def test_login_invalid_password(self, mock_session):
         """Login with wrong password should raise 401."""
+        from fastapi import HTTPException
+
+        from app.core.auth.dependencies import get_password_hash
+        from app.services.auth_service import auth_service
+
         mock_user = MagicMock()
-        mock_user.hashed_password = "some_hash_different"
+        mock_user.hashed_password = get_password_hash("correct_password")
         mock_user.is_active = True
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_user
         mock_session.execute = AsyncMock(return_value=mock_result)
-
-        from app.services.auth_service import auth_service
-        from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
             await auth_service.login(
@@ -112,6 +115,42 @@ class TestAuthService:
             )
 
         assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Email o contraseña incorrectos"
+
+    @pytest.mark.asyncio
+    async def test_login_malformed_password_hash_returns_generic_401(self, mock_session):
+        """Malformed stored hashes should be indistinguishable from wrong credentials."""
+        mock_user = MagicMock()
+        mock_user.hashed_password = "not-a-passlib-hash"
+        mock_user.is_active = True
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        from fastapi import HTTPException
+
+        from app.services.auth_service import auth_service
+
+        with pytest.raises(HTTPException) as exc_info:
+            await auth_service.login(
+                email="test@example.com",
+                password="any_password",
+            )
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Email o contraseña incorrectos"
+
+    def test_password_verification_does_not_hide_unexpected_errors(self):
+        from app.core.auth import dependencies
+
+        with patch.object(
+            dependencies.pwd_context,
+            "verify",
+            side_effect=RuntimeError("unexpected verification failure"),
+        ):
+            with pytest.raises(RuntimeError, match="unexpected verification failure"):
+                dependencies.verify_password("password", "hash")
 
     @pytest.mark.asyncio
     async def test_login_nonexistent_user(self, mock_session):
@@ -120,8 +159,9 @@ class TestAuthService:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        from app.services.auth_service import auth_service
         from fastapi import HTTPException
+
+        from app.services.auth_service import auth_service
 
         with pytest.raises(HTTPException) as exc_info:
             await auth_service.login(
