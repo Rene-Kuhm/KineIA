@@ -1,8 +1,21 @@
 # Benchmark KineIA — Dataset de Evaluación OSCE
 
-> **Objetivo**: Proveer 200+ pares pregunta-respuesta para evaluar sistemáticamente el desempeño de KineIA contra el marco OSCE de 32 ejes.
+> **Estado actual**: 15 pares pregunta-respuesta completos y ejecutables por `scripts/evaluate.py`.
 >
-> **Metodología**: Cada pregunta incluye respuesta esperada con fuentes verificables de la base de conocimiento de KineIA (currícula UNC, protocolos INAREPs/SATI, guías clínicas, libros de referencia).
+> **Objetivo futuro**: Superar los 200 pares completos. El banco por área al final de este documento es una hoja de ruta, no un dataset terminado.
+>
+> **Metodología actual**: Cada entrada completa incluye una respuesta esperada y referencias de la base de conocimiento de KineIA. Este documento no acredita todavía validación clínica externa ni métricas de recuperación.
+
+## Estado del dataset
+
+| Estado | Cantidad |
+|---|---:|
+| Pares completos y ejecutables | 15 |
+| Espacios pendientes en la hoja de ruta actual | 175 |
+| Capacidad total definida por la hoja de ruta | 190 |
+| Objetivo de largo plazo | 200+ |
+
+Para alcanzar el objetivo de 200+, además de completar los 175 espacios pendientes, se deben definir al menos 10 entradas adicionales.
 
 ## Estructura de cada pregunta
 
@@ -23,9 +36,9 @@ Cada entrada del benchmark sigue este formato:
 
 ---
 
-## Preguntas de Ejemplo (15 completas — 3 por área principal)
+## Preguntas completas (15 — 3 por área principal)
 
-A continuación se presentan 15 preguntas completamente desarrolladas como referencia. Las 185+ restantes siguen la misma estructura; ver sección "Banco de Preguntas por Área" al final del documento.
+A continuación se presentan las únicas 15 preguntas completamente desarrolladas del baseline actual. Los temas del banco por área todavía no cuentan como pares evaluables hasta incorporar todos los campos de la plantilla.
 
 ---
 
@@ -699,9 +712,9 @@ Según los estándares SATI y la evidencia actual en cuidados críticos:
 
 ---
 
-## Banco de Preguntas por Área (Template para 185+ preguntas restantes)
+## Hoja de ruta del banco por área (175 espacios pendientes)
 
-A continuación se presenta la estructura para completar el benchmark con las 185+ preguntas restantes. Cada área debe tener entre 25-35 preguntas distribuidas en niveles de dificultad y modos.
+A continuación se planifican 190 espacios distribuidos por área: 15 ya están completos y 175 siguen pendientes. Esta planificación debe ampliarse en al menos 10 entradas para alcanzar el objetivo de 200+ pares completos.
 
 ---
 

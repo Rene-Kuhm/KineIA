@@ -203,6 +203,47 @@ OSCE_AXES = {
     },
 }
 
+OSCE_MAX_SCORE = 160.0
+AXIS_MAX_SCORE = 5
+CATEGORY_MAX_SCORE = 100.0
+
+
+def calculate_osce_scores(axis_scores: dict[str, int]) -> tuple[float, dict[str, float]]:
+    """Map complete 1-5 scores to total 32-160 and category 20-100 scales."""
+    missing_axes = sorted(set(OSCE_AXES) - set(axis_scores))
+    if missing_axes:
+        raise ValueError(f"Missing OSCE axis scores: {', '.join(missing_axes)}")
+
+    invalid_scores = [
+        f"{code}={axis_scores[code]}"
+        for code in OSCE_AXES
+        if not 1 <= axis_scores[code] <= AXIS_MAX_SCORE
+    ]
+    if invalid_scores:
+        raise ValueError(
+            f"OSCE axis scores must be between 1 and {AXIS_MAX_SCORE}; "
+            f"invalid: {', '.join(invalid_scores)}"
+        )
+
+    total_weight = sum(axis["peso"] for axis in OSCE_AXES.values())
+    weighted_total = sum(axis_scores[code] * axis["peso"] for code, axis in OSCE_AXES.items())
+    total = weighted_total / (AXIS_MAX_SCORE * total_weight) * OSCE_MAX_SCORE
+
+    categories: dict[str, float] = {}
+    for category in {axis["categoria"] for axis in OSCE_AXES.values()}:
+        category_axes = {
+            code: axis for code, axis in OSCE_AXES.items() if axis["categoria"] == category
+        }
+        category_weight = sum(axis["peso"] for axis in category_axes.values())
+        weighted_category = sum(
+            axis_scores[code] * axis["peso"] for code, axis in category_axes.items()
+        )
+        categories[category] = (
+            weighted_category / (AXIS_MAX_SCORE * category_weight) * CATEGORY_MAX_SCORE
+        )
+
+    return total, categories
+
 
 # ============================================================================
 # Modelos de datos
@@ -308,7 +349,9 @@ def parse_benchmark(archivo: str) -> list[PreguntaBenchmark]:
             return match.group(1).strip() if match else ""
 
         id_match = re.search(r"### Pregunta #(\d+)", bloque)
-        pregunta_id = id_match.group(1) if id_match else "???"
+        if not id_match:
+            continue
+        pregunta_id = id_match.group(1)
 
         area = extraer("Área", bloque)
         tema = extraer("Tema", bloque)
@@ -747,26 +790,7 @@ class OSCEScorer:
             )
             scores[eje_code] = score
 
-        # Calcular puntajes compuestos ponderados
-        def cat_score(cat: str) -> float:
-            total = 0.0
-            for eje_code, eje_info in OSCE_AXES.items():
-                if eje_info["categoria"] == cat:
-                    raw = scores.get(eje_code, 0)
-                    # Normalizar: puntaje bruto (1-5) multiplicado por peso del eje dentro de la categoría
-                    # Luego escalamos a 0-100% del máximo de la categoría
-                    total += raw * eje_info["peso"]
-            # Convertir a escala 0-100% de la categoría
-            cat_max = sum(
-                e["peso"] * 5 for e in OSCE_AXES.values() if e["categoria"] == cat
-            )
-            return (total / cat_max * 100) if cat_max > 0 else 0.0
-
-        score_total = sum(
-            scores.get(e, 0) * OSCE_AXES[e]["peso"] for e in OSCE_AXES
-        )
-        # Normalizar a 160 (32 ejes × 5 puntos)
-        score_total = (score_total / 0.20) * 160  # 0.20 = suma de pesos = 1.0, 5 puntos máx por eje
+        score_total, category_scores = calculate_osce_scores(scores)
 
         return ResultadoEvaluacion(
             pregunta_id=pregunta.id,
@@ -775,12 +799,12 @@ class OSCEScorer:
             dificultad=pregunta.dificultad,
             modo=pregunta.modo,
             scores=scores,
-            score_total=min(score_total, 160.0),
-            score_anamnesis=cat_score("Anamnesis"),
-            score_diagnostico=cat_score("Diagnóstico"),
-            score_manejo=cat_score("Manejo"),
-            score_comunicacion=cat_score("Comunicación"),
-            score_integracion=cat_score("Integración"),
+            score_total=score_total,
+            score_anamnesis=category_scores["Anamnesis"],
+            score_diagnostico=category_scores["Diagnóstico"],
+            score_manejo=category_scores["Manejo"],
+            score_comunicacion=category_scores["Comunicación"],
+            score_integracion=category_scores["Integración"],
             response_time_ms=respuesta.response_time_ms,
             sources_count=len(respuesta.sources),
         )
