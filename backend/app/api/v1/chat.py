@@ -10,7 +10,12 @@ from app.core.auth.dependencies import get_current_user, get_optional_user
 from app.core.llm.provider import llm_provider
 from app.core.rag.reranker import rerank
 from app.models.user import User
-from app.services.chat_service import chat_service
+from app.services.chat_service import (
+    LLM_FAILURE_CODE,
+    LLM_FAILURE_MESSAGE,
+    chat_service,
+    record_llm_failure,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -69,14 +74,21 @@ async def create_chat_message_stream(
         docs = rerank(query=request.query, documents=docs)
 
         # 2. Stream tokens from LLM
-        async for token in llm_provider.generate_response_stream(
-            query=request.query,
-            context_docs=docs,
-            history=request.history,
-            mode=request.mode,
-        ):
-            full_response += token
-            yield f"data: {json.dumps({'token': token})}\n\n"
+        try:
+            async for token in llm_provider.generate_response_stream(
+                query=request.query, context_docs=docs,
+                history=request.history, mode=request.mode,
+            ):
+                full_response += token
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        except Exception as error:
+            correlation_id = record_llm_failure(error)
+            # Partial output ends with this error event; no DONE or persistence follows.
+            event = {"error": {"code": LLM_FAILURE_CODE,
+                                "message": LLM_FAILURE_MESSAGE,
+                                "correlation_id": correlation_id}}
+            yield f"data: {json.dumps(event)}\n\n"
+            return
 
         response_time_ms = int((time.time() - start_time) * 1000)
 

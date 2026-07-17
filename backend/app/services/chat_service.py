@@ -1,6 +1,11 @@
 # ruff: noqa: E501
+import logging
+import re
 import time
+import uuid
 from datetime import datetime
+
+from sqlalchemy import delete, select
 
 from app.core.llm.provider import llm_provider
 from app.core.rag.reranker import rerank
@@ -8,7 +13,34 @@ from app.db.postgres import async_session
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.rag.retriever import retriever
-from sqlalchemy import delete, select
+
+logger = logging.getLogger(__name__)
+
+LLM_FAILURE_CODE = "AI_SERVICE_UNAVAILABLE"
+LLM_FAILURE_MESSAGE = "No pude generar una respuesta porque el servicio de IA no está disponible. Intentá nuevamente más tarde."
+LLM_FAILURE_RESPONSE = f"⚠️ {LLM_FAILURE_MESSAGE}\n\nCódigo: {LLM_FAILURE_CODE}"
+_SAFE_EXCEPTION_CLASS = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+
+
+def record_llm_failure(error: Exception) -> str:
+    """Emit a bounded diagnostic without serializing provider details."""
+    correlation_id = uuid.uuid4().hex
+    try:
+        exception_class = type(error).__name__
+        if not _SAFE_EXCEPTION_CLASS.fullmatch(exception_class):
+            exception_class = "Exception"
+        logger.error(
+            "llm_generation_failed",
+            extra={
+                "reason_code": LLM_FAILURE_CODE,
+                "exception_class": exception_class,
+                "correlation_id": correlation_id,
+            },
+        )
+    except Exception:
+        # Diagnostics are best-effort and must not affect the public response.
+        pass
+    return correlation_id
 
 # Anatomical image map — matched by keyword in query
 ANATOMY_IMAGES = {
@@ -137,12 +169,9 @@ class ChatService:
             response = await llm_provider.generate_response(
                 query=query, context_docs=docs, history=history, mode=mode
             )
-        except Exception as e:
-            response = (
-                "⚠️ No pude generar una respuesta porque el servicio de IA no está disponible.\n\n"
-                f"Error: {str(e)}\n\n"
-                "Verificá que la API key (GROQ_API_KEY) esté configurada correctamente en el archivo .env"
-            )
+        except Exception as error:
+            record_llm_failure(error)
+            response = LLM_FAILURE_RESPONSE
         response_time_ms = int((time.time() - start_time) * 1000)
 
         # Format sources
