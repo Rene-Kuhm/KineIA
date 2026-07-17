@@ -24,6 +24,7 @@ class TestRetriever:
                 "university": "UBA",
                 "author": f"Autor {i}",
                 "year": 2020,
+                "chunk_index": i,
             }
             points.append(point)
         results.points = points
@@ -47,6 +48,9 @@ class TestRetriever:
         assert all("text" in doc for doc in results)
         assert all("metadata" in doc for doc in results)
         assert all("score" in doc for doc in results)
+        assert [doc["metadata"]["chunk_index"] for doc in results] == [0, 1, 2]
+        identity = retriever.evaluation_identity()
+        assert identity["served_mode"] == "dense" and identity["score_type"] == "cosine" and identity["embedding_model"] and identity["gate"] is None  # noqa: E501
         assert results[0]["score"] >= results[-1]["score"]
 
     @patch("app.services.rag.retriever.generate_embedding")
