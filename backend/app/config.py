@@ -1,5 +1,6 @@
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -39,6 +40,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = 50
     retriever_top_k: int = 10
     reranker_top_k: int = 5
+    retriever_hybrid_shadow_enabled: bool = False
+    retriever_hybrid_candidate_k: int = Field(default=30, ge=1, le=100)
+    retriever_hybrid_timeout_seconds: int = Field(default=2, ge=1, le=10)
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

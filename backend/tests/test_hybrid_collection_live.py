@@ -126,3 +126,56 @@ def test_live_backfill_resumes_is_idempotent_and_never_overwrites():
         for collection in (legacy, hybrid):
             if client.collection_exists(collection):
                 client.delete_collection(collection)
+
+def test_live_shadow_rrf_keeps_filtered_dense_results_authoritative(monkeypatch, caplog):
+    if os.getenv("QDRANT_INTEGRATION") != "1":
+        pytest.skip("QDRANT_INTEGRATION=1 is required")
+    from app.services.rag import retriever as module
+
+    client = QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+                          check_compatibility=False)
+    suffix = uuid.uuid4().hex
+    legacy, hybrid = f"legacy_{suffix}", f"hybrid_{suffix}"
+    class Encoder:
+        def encode(self, _query):
+            return SparseVector(indices=[1], values=[1.0])
+    try:
+        client.create_collection(collection_name=legacy,
+                                 vectors_config=VectorParams(size=2, distance=Distance.COSINE))
+        client.create_collection(
+            collection_name=hybrid,
+            vectors_config={"dense": VectorParams(size=2, distance=Distance.COSINE)},
+            sparse_vectors_config={"sparse": SparseVectorParams(modifier=Modifier.IDF)},
+        )
+        payloads = [
+            {"text": "authoritative", "title": "match", "area": "trauma",
+             "evidence_level": "book"},
+            {"text": "excluded", "title": "other", "area": "neurology",
+             "evidence_level": "paper"},
+        ]
+        client.upsert(legacy, [PointStruct(id=i, vector=[1.0, i / 10], payload=payload)
+                              for i, payload in enumerate(payloads, 1)])
+        client.upsert(hybrid, [
+            PointStruct(id=i, vector={"dense": [1.0, i / 10],
+                        "sparse": SparseVector(indices=[i], values=[1.0])}, payload=payload)
+            for i, payload in enumerate(payloads, 1)
+        ])
+        monkeypatch.setattr(module, "get_qdrant", lambda: client)
+        monkeypatch.setattr(module, "generate_embedding", lambda _query: [1.0, 0.1])
+        monkeypatch.setattr(module, "SpanishBm25Encoder", Encoder)
+        for name, value in (("qdrant_collection", legacy),
+                            ("qdrant_hybrid_collection", hybrid),
+                            ("qdrant_dense_vector_name", "dense"),
+                            ("qdrant_sparse_vector_name", "sparse")):
+            monkeypatch.setattr(module.settings, name, value)
+        monkeypatch.setattr(module.settings, "retriever_hybrid_shadow_enabled", False)
+        dense = module.Retriever().search("rodilla", area="trauma", evidence_level="book")
+        monkeypatch.setattr(module.settings, "retriever_hybrid_shadow_enabled", True)
+        caplog.set_level("INFO", logger=module.__name__)
+        observed = module.Retriever().search("rodilla", area="trauma", evidence_level="book")
+        assert client.info().version == "1.18.2" and observed == dense
+        assert len(observed) == 1 and "shadow_candidates=1" in caplog.text
+    finally:
+        for collection in (legacy, hybrid):
+            if client.collection_exists(collection):
+                client.delete_collection(collection)
