@@ -15,7 +15,6 @@ from qdrant_client.models import (
 
 def test_root_command_and_custom_hybrid_configuration(tmp_path):
     from app.config import Settings
-
     root = Path(__file__).parents[2]
     env_example = (root / ".env.example").read_text(encoding="utf-8")
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
@@ -34,37 +33,24 @@ def test_root_command_and_custom_hybrid_configuration(tmp_path):
 
 def provision(client, collection="knowledge_v2"):
     from app.db.hybrid_collection import provision_hybrid_collection
-
     return provision_hybrid_collection(
         client,
-        legacy_collection_name="legacy",
-        collection_name=collection,
-        dense_vector_name="dense",
-        sparse_vector_name="sparse",
+        legacy_collection_name="legacy", collection_name=collection,
+        dense_vector_name="dense", sparse_vector_name="sparse",
         dimensions=1024,
     )
 
 
 def collection_info(
-    *,
-    size=1024,
-    distance=Distance.COSINE,
-    modifier=Modifier.IDF,
-    dense_name="dense",
-    sparse_name="sparse",
-    fields=None,
-    schema=PayloadSchemaType.KEYWORD,
+    *, size=1024, distance=Distance.COSINE, modifier=Modifier.IDF,
+    dense_name="dense", sparse_name="sparse", fields=None, schema=PayloadSchemaType.KEYWORD,
 ):
     fields = ("area", "evidence_level", "source_id") if fields is None else fields
-    return SimpleNamespace(
-        config=SimpleNamespace(
-            params=SimpleNamespace(
-                vectors={dense_name: VectorParams(size=size, distance=distance)},
-                sparse_vectors={sparse_name: SparseVectorParams(modifier=modifier)},
-            )
-        ),
-        payload_schema={field: PayloadIndexInfo(data_type=schema, points=0) for field in fields},
-    )
+    vectors = {dense_name: VectorParams(size=size, distance=distance)}
+    sparse = {sparse_name: SparseVectorParams(modifier=modifier)}
+    params = SimpleNamespace(vectors=vectors, sparse_vectors=sparse)
+    payload = {field: PayloadIndexInfo(data_type=schema, points=0) for field in fields}
+    return SimpleNamespace(config=SimpleNamespace(params=params), payload_schema=payload)
 
 
 def test_missing_collection_is_created_with_exact_hybrid_schema_and_indexes():
@@ -96,12 +82,9 @@ def test_exact_existing_schema_is_idempotent():
 
 def test_incompatible_existing_schema_fails_without_mutation():
     for info in (
-        collection_info(size=384),
-        collection_info(distance=Distance.DOT),
-        collection_info(modifier=None),
-        collection_info(schema=PayloadSchemaType.TEXT),
-        collection_info(dense_name="other"),
-        collection_info(sparse_name="other"),
+        collection_info(size=384), collection_info(distance=Distance.DOT),
+        collection_info(modifier=None), collection_info(schema=PayloadSchemaType.TEXT),
+        collection_info(dense_name="other"), collection_info(sparse_name="other"),
     ):
         client = MagicMock()
         client.collection_exists.return_value = True
