@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+# ruff: noqa: E501
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -16,6 +17,8 @@ class TestChatService:
                         "evidence_level": "book",
                     },
                     "score": 0.95,
+                    "rerank_score": 0.99,
+                    "retrieval_mode": "hybrid", "score_type": "rrf",
                 },
                 {
                     "text": "Guía de rehabilitación para LCA.",
@@ -132,3 +135,6 @@ class TestChatService:
         for source in result["sources"]:
             assert "score" in source
             assert isinstance(source["score"], (int, float))
+        assert result["sources"][0]["score"] == 0.95
+        assert (result["sources"][0]["retrieval_mode"],
+                result["sources"][0]["score_type"]) == ("hybrid", "rrf")

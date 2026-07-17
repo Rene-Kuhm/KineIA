@@ -1,7 +1,6 @@
+# ruff: noqa: E501
 import time
 from datetime import datetime
-
-from sqlalchemy import select, delete
 
 from app.core.llm.provider import llm_provider
 from app.core.rag.reranker import rerank
@@ -9,6 +8,7 @@ from app.db.postgres import async_session
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.rag.retriever import retriever
+from sqlalchemy import delete, select
 
 # Anatomical image map — matched by keyword in query
 ANATOMY_IMAGES = {
@@ -122,9 +122,11 @@ class ChatService:
         history: list[dict] | None = None,
         user_id: str | None = None,
         conversation_id: str | None = None,
+        retrieval=None,
     ) -> dict:
         # Retrieve relevant context
-        docs = retriever.search(query=query, area=area, evidence_level=evidence_level)
+        docs = (retrieval or retriever).search(
+            query=query, area=area, evidence_level=evidence_level)
 
         # Re-rank results for better relevance
         docs = rerank(query=query, documents=docs)
@@ -153,6 +155,8 @@ class ChatService:
                     "source": metadata.get("source", "Desconocido"),
                     "evidence_level": metadata.get("evidence_level", "unknown"),
                     "score": doc.get("score", 0.0),
+                    "retrieval_mode": doc.get("retrieval_mode", "dense"),
+                    "score_type": doc.get("score_type", "cosine"),
                 }
             )
 

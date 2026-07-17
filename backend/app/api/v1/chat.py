@@ -2,7 +2,7 @@ import json
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -11,7 +11,6 @@ from app.core.llm.provider import llm_provider
 from app.core.rag.reranker import rerank
 from app.models.user import User
 from app.services.chat_service import chat_service
-from app.services.rag.retriever import retriever
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -28,6 +27,7 @@ class ChatRequest(BaseModel):
 @router.post("")
 async def create_chat_message(
     request: ChatRequest,
+    http_request: Request,
     current_user: Optional[User] = Depends(get_optional_user),
 ):
     result = await chat_service.chat(
@@ -38,6 +38,7 @@ async def create_chat_message(
         history=request.history,
         user_id=current_user.id if current_user else None,
         conversation_id=request.conversation_id,
+        retrieval=http_request.app.state.retriever,
     )
     return {"status": "success", "data": result}
 
@@ -45,6 +46,7 @@ async def create_chat_message(
 @router.post("/stream")
 async def create_chat_message_stream(
     request: ChatRequest,
+    http_request: Request,
     current_user: Optional[User] = Depends(get_optional_user),
 ):
     """Stream chat response tokens via Server-Sent Events.
@@ -59,7 +61,7 @@ async def create_chat_message_stream(
         start_time = time.time()
 
         # 1. Retrieve and re-rank context
-        docs = retriever.search(
+        docs = http_request.app.state.retriever.search(
             query=request.query,
             area=request.area,
             evidence_level=request.evidence_level,
@@ -88,6 +90,8 @@ async def create_chat_message_stream(
                     "source": metadata.get("source", "Desconocido"),
                     "evidence_level": metadata.get("evidence_level", "unknown"),
                     "score": doc.get("score", 0.0),
+                    "retrieval_mode": doc.get("retrieval_mode", "dense"),
+                    "score_type": doc.get("score_type", "cosine"),
                 }
             )
 
@@ -99,10 +103,12 @@ async def create_chat_message_stream(
         # 5. Persist conversation when user is authenticated
         if current_user is not None:
             from datetime import datetime
+
+            from sqlalchemy import select
+
             from app.db.postgres import async_session
             from app.models.conversation import Conversation
             from app.models.message import Message
-            from sqlalchemy import select
 
             async with async_session() as session:
                 if request.conversation_id:

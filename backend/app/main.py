@@ -1,13 +1,41 @@
-from contextlib import asynccontextmanager
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.middleware import RateLimitMiddleware
+from app.api.v1 import auth, chat, images, knowledge, search
 from app.config import settings
-from app.db.postgres import engine, Base
-from app.db.qdrant import init_qdrant_collection
-from app.api.v1 import chat, search, auth, knowledge, images
+from app.db.postgres import Base, engine
+from app.db.qdrant import get_qdrant, init_qdrant_collection
+from app.services.rag.hybrid_gate import HybridGate, build_hybrid_gate
+from app.services.rag.retriever import Retriever
+
+logger = logging.getLogger(__name__)
+
+
+async def create_retriever(config=settings, client=None):
+    client = client or get_qdrant()
+    if config.retriever_read_mode == "dense":
+        return Retriever(client=client, read_mode="dense")
+    try:
+        gate = await asyncio.wait_for(
+            asyncio.to_thread(build_hybrid_gate, config, client),
+            timeout=config.hybrid_readiness_timeout_seconds,
+        )
+    except Exception as error:
+        gate = HybridGate(reason="startup_check_failed")
+        with suppress(Exception):
+            logger.warning("hybrid_readiness status=disabled reason=%s exception_class=%s",
+                           gate.reason, type(error).__name__)
+    else:
+        log = logger.info if gate.allows_hybrid() else logger.warning
+        with suppress(Exception):
+            log("hybrid_readiness status=%s reason=%s",
+                "enabled" if gate.allows_hybrid() else "disabled", gate.reason)
+    return Retriever(client=client, read_mode="hybrid", gate=gate)
 
 
 @asynccontextmanager
@@ -16,6 +44,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await init_qdrant_collection()
+    app.state.retriever = await create_retriever()
     yield
     # Shutdown
     await engine.dispose()
