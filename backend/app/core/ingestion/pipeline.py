@@ -18,7 +18,7 @@ from app.core.ingestion.embedder import generate_embeddings
 from app.core.ingestion.extractors.markdown import extract_markdown
 from app.core.ingestion.extractors.pdf import extract_pdf
 from app.core.ingestion.extractors.text import extract_text
-from app.core.ingestion.provenance import SourceProvenance
+from app.core.ingestion.provenance import SourceProvenance, safe_citation_title
 from app.db.qdrant import qdrant_client
 
 EXTRACTORS = {
@@ -63,6 +63,7 @@ def prepare_ingestion(
     file_metadata.setdefault("original_source_name", extracted.get("file_name", path.name))
     file_metadata.setdefault("original_source_path", _original_source_path(path))
     provenance = SourceProvenance.from_content(text, file_metadata)
+    title = safe_citation_title(file_metadata.get("title"), provenance.original_source_name)
 
     # 2. Chunk
     chunks = chunk_text(
@@ -92,9 +93,12 @@ def prepare_ingestion(
             "text": chunk["text"],
             "header": chunk.get("header", ""),
             "chunk_index": i,
-            "source_file": provenance.original_source_path,
-            "file_name": provenance.original_source_name,
-            "title": file_metadata.get("title", path.stem),
+            "fragment_hash": chunk_hash,
+            "section_heading": chunk.get("section_heading"),
+            "section_path": chunk.get("section_path"),
+            "page_start": None,
+            "page_end": None,
+            "title": title,
         }
         if file_metadata.get("university"):
             payload["university"] = file_metadata["university"]
@@ -104,7 +108,7 @@ def prepare_ingestion(
         "status": "success",
         "chunks": len(chunks),
         "file": provenance.original_source_path,
-        "title": file_metadata.get("title", path.stem),
+        "title": title,
         "source_id": provenance.source_id,
         "source_version": provenance.source_version,
         "source_version_id": provenance.source_version_id,

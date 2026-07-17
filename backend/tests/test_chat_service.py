@@ -2,7 +2,7 @@
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -26,7 +26,11 @@ class TestChatService:
                     "metadata": {
                         "title": "Manual de Kinesiología",
                         "source": "UBA",
+                        "original_source_name": "manual.md",
                         "evidence_level": "book",
+                        "fragment_hash": "a" * 64,
+                        "section_heading": "Rodilla",
+                        "section_path": ["Miembro inferior", "Rodilla"],
                     },
                     "score": 0.95,
                     "rerank_score": 0.99,
@@ -78,6 +82,58 @@ class TestChatService:
         assert "title" in result["sources"][0]
         assert "evidence_level" in result["sources"][0]
         assert "score" in result["sources"][0]
+
+    @pytest.mark.asyncio
+    async def test_sync_and_stream_share_exact_citation_contract(self, mock_retriever):
+        from app.api.v1.chat import ChatRequest, create_chat_message_stream
+        from app.services.chat_service import chat_service
+
+        async def stream(**_kwargs):
+            yield "answer"
+
+        session, manager = AsyncMock(), AsyncMock()
+        session.add = MagicMock()
+        manager.__aenter__.return_value = session
+        with patch("app.services.chat_service.async_session", return_value=manager):
+            sync = await chat_service.chat(query="test", user_id="user-1")
+        http_request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(retriever=mock_retriever)))
+        with (patch("app.api.v1.chat.rerank", side_effect=lambda query, documents: documents),
+              patch("app.api.v1.chat.llm_provider.generate_response_stream", new=stream)):
+            response = await create_chat_message_stream(ChatRequest(query="test"), http_request, current_user=None)
+            events = [chunk async for chunk in response.body_iterator]
+        streamed = next(json.loads(event[6:])["sources"] for event in events if '"sources"' in event)
+
+        assistant = next(call.args[0] for call in session.add.call_args_list if getattr(call.args[0], "role", None) == "assistant")
+        assert streamed == sync["sources"] == assistant.sources
+        assert streamed[0]["fragment_hash"] == "a" * 64
+        assert streamed[0]["page_start"] is streamed[0]["page_end"] is None
+
+    @pytest.mark.asyncio
+    async def test_history_normalizes_legacy_sources_before_returning_them(self):
+        from app.services.chat_service import chat_service
+        from app.services.rag.citations import format_sources
+
+        conversation = SimpleNamespace(id="c1", title="History", mode="student", created_at=None, updated_at=None)
+        legacy = {"title": "/private/guide.md", "source": "/private/guide.md", "url": "file:///private/guide.md", "fragment_hash": "forged"}
+        messages = [SimpleNamespace(id=f"m{i}", role="assistant", content="answer", sources=sources,
+                    tokens_used=None, response_time_ms=1, created_at=None)
+                    for i, sources in enumerate(([legacy], None, {}, legacy))]
+        first, second = MagicMock(), MagicMock()
+        first.scalar_one_or_none.return_value = conversation
+        second.scalars.return_value.all.return_value = messages
+        session = AsyncMock()
+        session.execute.side_effect = [first, second]
+        manager = AsyncMock()
+        manager.__aenter__.return_value = session
+        with patch("app.services.chat_service.async_session", return_value=manager):
+            result = await chat_service.get_conversation_messages("c1", "user-1")
+
+        returned = [item["sources"] for item in result["messages"]]
+        source = returned[0][0]
+        assert source == format_sources([legacy])[0]
+        assert source["source"] == source["title"] == "guide.md"
+        assert source["url"] is source["fragment_hash"] is None
+        assert returned[1:3] == [[], []] and returned[3] == [source]
 
     @pytest.mark.asyncio
     async def test_chat_passes_mode_to_llm(self, mock_llm):

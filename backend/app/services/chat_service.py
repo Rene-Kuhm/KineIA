@@ -10,6 +10,7 @@ from app.core.rag.reranker import rerank
 from app.db.postgres import async_session
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.services.rag.citations import format_sources
 from app.services.rag.retriever import retriever
 from sqlalchemy import delete, select
 
@@ -173,20 +174,7 @@ class ChatService:
             response = LLM_FAILURE_RESPONSE
         response_time_ms = int((time.time() - start_time) * 1000)
 
-        # Format sources
-        sources = []
-        for doc in docs:
-            metadata = doc.get("metadata", {})
-            sources.append(
-                {
-                    "title": metadata.get("title", "Desconocido"),
-                    "source": metadata.get("source", "Desconocido"),
-                    "evidence_level": metadata.get("evidence_level", "unknown"),
-                    "score": doc.get("score", 0.0),
-                    "retrieval_mode": doc.get("retrieval_mode", "dense"),
-                    "score_type": doc.get("score_type", "cosine"),
-                }
-            )
+        sources = format_sources(docs)
 
         result = {
             "answer": response,
@@ -307,7 +295,7 @@ class ChatService:
                         "id": m.id,
                         "role": m.role,
                         "content": m.content,
-                        "sources": m.sources,
+                        "sources": format_sources(m.sources),
                         "tokens_used": m.tokens_used,
                         "response_time_ms": m.response_time_ms,
                         "created_at": m.created_at.isoformat() if m.created_at else None,

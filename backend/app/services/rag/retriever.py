@@ -98,15 +98,15 @@ class Retriever:
                 continue
             metadata_fields = (
                 "title", "source_id", "source_version", "source_version_id", "content_hash",
-                "original_source_name", "original_source_path", "url", "doi", "isbn", "edition",
+                "original_source_name", "url", "doi", "isbn", "edition",
                 "publisher", "license", "rights", "author", "year", "publication_date",
                 "acquisition_date", "reviewer", "review_date", "review_due_date", "evidence_level",
                 "area", "population", "source_type", "university", "chunk_index",
+                "fragment_hash", "section_heading", "section_path", "page_start", "page_end",
             )
             metadata = {key: res.payload[key] for key in metadata_fields
                         if key in res.payload and res.payload[key] is not None}
-            source = (res.payload.get("original_source_path") or res.payload.get("source_file")
-                      or res.payload.get("file_name"))
+            source = res.payload.get("original_source_name")
             if source:
                 metadata["source"] = source
             documents.append({"text": res.payload.get("text", ""), "metadata": metadata,

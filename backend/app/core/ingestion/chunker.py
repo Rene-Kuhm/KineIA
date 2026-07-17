@@ -7,25 +7,44 @@ def chunk_text(
     chunk_overlap: int = 50,
 ) -> list[dict]:
     """Split text into overlapping chunks, respecting paragraph and header boundaries."""
-    # Split by headers and double newlines first
-    sections = re.split(r"\n(?=#{1,4}\s)", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    sections = re.split(r"\n(?=#{1,6}(?:[ \t]|\n|$))", text)
 
     chunks = []
     current_chunk = ""
     current_header = ""
+    current_section_heading = None
+    current_section_path = None
+    section_slots = [None] * 6
 
     for section in sections:
         # Detect header
-        header_match = re.match(r"^(#{1,4}\s+.+)(?:\n|$)", section)
+        header_match = re.match(r"^(#{1,6})(?:[ \t]+([^\n]*))?(?:\n|$)", section)
         if header_match:
             if current_chunk:
                 chunks.append({
                     "text": current_chunk.strip(),
                     "header": current_header,
                     "word_count": len(current_chunk.split()),
+                    "section_heading": current_section_heading,
+                    "section_path": current_section_path,
                 })
                 current_chunk = ""
-            current_header = header_match.group(1).strip()
+            marks, heading = header_match.groups()
+            current_header = header_match.group(0).strip()
+            safe_heading = (heading or "").strip()
+            if (not safe_heading or len(safe_heading) > 200
+                    or not all(char.isprintable() for char in safe_heading)):
+                safe_heading = None
+            level = len(marks) - 1
+            section_slots[level:] = [None] * (6 - level)
+            section_slots[level] = safe_heading or False
+            visible_slots = section_slots[: level + 1]
+            valid_locator = False not in visible_slots
+            current_section_heading = safe_heading if valid_locator else None
+            current_section_path = (
+                [part for part in visible_slots if part] if valid_locator else None
+            )
 
         paragraphs = section.split("\n\n")
 
@@ -45,6 +64,8 @@ def chunk_text(
                         "text": current_chunk.strip(),
                         "header": current_header,
                         "word_count": len(current_chunk.split()),
+                        "section_heading": current_section_heading,
+                        "section_path": current_section_path,
                     })
 
                 # Handle overlap
@@ -64,6 +85,8 @@ def chunk_text(
                                 "text": " ".join(chunk_words),
                                 "header": current_header,
                                 "word_count": len(chunk_words),
+                                "section_heading": current_section_heading,
+                                "section_path": current_section_path,
                             })
                     current_chunk = ""
 
@@ -73,6 +96,8 @@ def chunk_text(
             "text": current_chunk.strip(),
             "header": current_header,
             "word_count": len(current_chunk.split()),
+            "section_heading": current_section_heading,
+            "section_path": current_section_path,
         })
 
     return chunks

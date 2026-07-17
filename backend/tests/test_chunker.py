@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 from app.core.ingestion.chunker import chunk_text
 
 
@@ -50,6 +51,8 @@ class TestChunkText:
             "text": "# Encabezado final",
             "header": "# Encabezado final",
             "word_count": 3,
+            "section_heading": "Encabezado final",
+            "section_path": ["Encabezado final"],
         }]
 
     def test_final_header_only_section_keeps_its_header(self):
@@ -67,6 +70,31 @@ class TestChunkText:
             ("# Principal", "# Principal"),
             ("## Subsección", "## Subsección\nContenido."),
         ]
+
+    def test_h1_to_h6_preserve_hierarchy_and_reset_siblings(self):
+        expected = [("A", ["A"]), ("D", ["A", "D"]), ("C", ["A", "C"]), ("F", ["A", "C", "F"]), ("B", ["A", "B"])]
+        for newline in ("\n", "\r\n"):
+            text = newline.join(("# A", "#### D", "### C", "###### F", "Detalle.", "## B", "Contenido."))
+            result = chunk_text(text, chunk_size=50, chunk_overlap=0)
+            assert [(chunk["section_heading"], chunk["section_path"]) for chunk in result] == expected
+
+    def test_invalid_heading_makes_its_locator_and_descendants_unavailable(self):
+        for invalid in ("   ", "x" * 201, "unsafe\x00heading", "unsafe\vheading", "unsafe\u2028heading", "unsafe\u2029heading"):
+            result = chunk_text(
+                f"# Root\n#### {invalid}\n##### Child\nBody.\n#### Sibling\n### Higher\nNext.",
+                chunk_size=50,
+                chunk_overlap=0,
+            )
+            assert all(chunk["section_path"] is None for chunk in result[1:3])
+            assert [chunk["section_path"] for chunk in result[-2:]] == [
+                ["Root", "Sibling"], ["Root", "Higher"]]
+
+    def test_blank_heading_is_a_boundary_without_fabricating_a_locator(self):
+        for newline in ("\n", "\r\n"):
+            result = chunk_text(newline.join(("# Root", "Intro", "# ", "Secret")), chunk_size=50, chunk_overlap=0)
+            assert [chunk["section_heading"] for chunk in result] == ["Root", None]
+            assert [chunk["section_path"] for chunk in result] == [["Root"], None]
+            assert "Intro" in result[0]["text"] and "Secret" in result[1]["text"]
 
     def test_empty_text(self):
         result = chunk_text("", chunk_size=100, chunk_overlap=10)
