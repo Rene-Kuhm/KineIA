@@ -40,10 +40,58 @@ def _emit_shadow_metric(*args, **kwargs):
 
 
 class Retriever:
-    def __init__(self):
-        self.client = get_qdrant()
+    def __init__(self, *, client=None, read_mode=None, gate=None):
+        self.client = client or get_qdrant()
         self.collection_name = settings.qdrant_collection
+        self.read_mode, self.gate = read_mode, gate
         self._sparse_encoder = None
+
+    def _hybrid_search(self, query, query_vector, query_filter, limit):
+        if self._sparse_encoder is None:
+            self._sparse_encoder = SpanishBm25Encoder()
+        candidate_k = max(limit, settings.retriever_hybrid_candidate_k)
+        return self.client.query_points(
+            collection_name=settings.qdrant_hybrid_collection,
+            prefetch=[
+                Prefetch(query=query_vector, using=settings.qdrant_dense_vector_name,
+                         filter=query_filter, limit=candidate_k),
+                Prefetch(query=self._sparse_encoder.encode(query),
+                         using=settings.qdrant_sparse_vector_name,
+                         filter=query_filter, limit=candidate_k),
+            ],
+            query=FusionQuery(fusion=Fusion.RRF), limit=limit, with_payload=True,
+            timeout=settings.retriever_hybrid_timeout_seconds,
+        )
+
+    def _dense_search(self, query_vector, query_filter, limit):
+        return self.client.query_points(
+            collection_name=self.collection_name, query=query_vector,
+            query_filter=query_filter, limit=limit, with_payload=True,
+        )
+
+    @staticmethod
+    def _documents(results, retrieval_mode, score_type):
+        documents = []
+        for res in results.points:
+            if not res.payload:
+                continue
+            metadata_fields = (
+                "title", "source_id", "source_version", "source_version_id", "content_hash",
+                "original_source_name", "original_source_path", "url", "doi", "isbn", "edition",
+                "publisher", "license", "rights", "author", "year", "publication_date",
+                "acquisition_date", "reviewer", "review_date", "review_due_date", "evidence_level",
+                "area", "population", "source_type", "university",
+            )
+            metadata = {key: res.payload[key] for key in metadata_fields
+                        if key in res.payload and res.payload[key] is not None}
+            source = (res.payload.get("original_source_path") or res.payload.get("source_file")
+                      or res.payload.get("file_name"))
+            if source:
+                metadata["source"] = source
+            documents.append({"text": res.payload.get("text", ""), "metadata": metadata,
+                              "score": res.score, "retrieval_mode": retrieval_mode,
+                              "score_type": score_type})
+        return documents
 
     def _shadow_search(self, query, query_vector, query_filter, limit,
                        primary_points, primary_ms):
@@ -101,50 +149,26 @@ class Retriever:
 
         query_filter = Filter(must=must_conditions) if must_conditions else None
 
+        if self.read_mode == "hybrid":
+            if self.gate and self.gate.allows_hybrid():
+                try:
+                    return self._documents(
+                        self._hybrid_search(query, query_vector, query_filter, limit),
+                        "hybrid", "rrf")
+                except Exception as error:
+                    with suppress(Exception):
+                        logger.warning("retrieval_hybrid status=fallback exception_class=%s",
+                                       type(error).__name__)
+            results = self._dense_search(query_vector, query_filter, limit)
+            return self._documents(results, "dense_fallback", "cosine")
+
         primary_started = perf_counter()
-        results = self.client.query_points(
-            collection_name=self.collection_name,
-            query=query_vector,
-            query_filter=query_filter,
-            limit=limit,
-            with_payload=True,
-        )
-        if settings.retriever_hybrid_shadow_enabled:
+        results = self._dense_search(query_vector, query_filter, limit)
+        if self.read_mode is None and settings.retriever_hybrid_shadow_enabled:
             with suppress(Exception):
                 self._shadow_search(query, query_vector, query_filter, limit, results.points,
                                     (perf_counter() - primary_started) * 1000)
-
-        documents = []
-        for res in results.points:
-            if res.payload:
-                metadata_fields = (
-                    "title", "source_id", "source_version", "source_version_id",
-                    "content_hash", "original_source_name",
-                    "original_source_path", "url", "doi", "isbn", "edition", "publisher",
-                    "license", "rights", "author", "year", "publication_date",
-                    "acquisition_date", "reviewer", "review_date", "review_due_date",
-                    "evidence_level", "area", "population", "source_type", "university",
-                )
-                metadata = {
-                    key: res.payload[key]
-                    for key in metadata_fields
-                    if key in res.payload and res.payload[key] is not None
-                }
-                source = (
-                    res.payload.get("original_source_path")
-                    or res.payload.get("source_file")
-                    or res.payload.get("file_name")
-                )
-                if source:
-                    metadata["source"] = source
-                doc = {
-                    "text": res.payload.get("text", ""),
-                    "metadata": metadata,
-                    "score": res.score,
-                }
-                documents.append(doc)
-
-        return documents
+        return self._documents(results, "dense", "cosine")
 
 
-retriever = Retriever()
+retriever = Retriever(read_mode="dense")

@@ -1,6 +1,7 @@
+from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -43,6 +44,10 @@ class Settings(BaseSettings):
     retriever_hybrid_shadow_enabled: bool = False
     retriever_hybrid_candidate_k: int = Field(default=30, ge=1, le=100)
     retriever_hybrid_timeout_seconds: int = Field(default=2, ge=1, le=10)
+    retriever_read_mode: Literal["dense", "hybrid"] = "dense"
+    hybrid_readiness_path: Path | None = None
+    hybrid_readiness_hmac_key: SecretStr = SecretStr("")
+    hybrid_readiness_timeout_seconds: int = Field(default=3, ge=1, le=10)
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

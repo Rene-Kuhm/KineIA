@@ -8,6 +8,8 @@ export interface SourceCardProps {
   source: string;
   evidence_level: string;
   score: number;
+  retrieval_mode?: "dense" | "hybrid" | "dense_fallback";
+  score_type?: "cosine" | "rrf";
 }
 
 const levelConfig: Record<string, { icon: React.ElementType; color: string; bg: string }> = {

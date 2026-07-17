@@ -173,6 +173,10 @@ def test_live_shadow_rrf_keeps_filtered_dense_results_authoritative(monkeypatch,
         monkeypatch.setattr(module.settings, "retriever_hybrid_shadow_enabled", True)
         caplog.set_level("INFO", logger=module.__name__)
         observed = module.Retriever().search("rodilla", area="trauma", evidence_level="book")
+        gate = type("Gate", (), {"allows_hybrid": lambda _self: True})()
+        active = module.Retriever(client=client, read_mode="hybrid", gate=gate).search("rodilla")
+        rollback = module.Retriever(client=client, read_mode="dense").search("rodilla")
+        assert active[0]["retrieval_mode"] == "hybrid" and rollback[0]["retrieval_mode"] == "dense"
         assert client.info().version == "1.18.2" and observed == dense
         assert len(observed) == 1 and "shadow_candidates=1" in caplog.text
     finally:
