@@ -1,7 +1,19 @@
 # ruff: noqa: E501
+import json
+import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+def _reject_str(self):
+    raise AssertionError("exception details were serialized")
+
+
+class FailingHandler(logging.Handler):
+    def emit(self, record):
+        raise RuntimeError("LOG-HANDLER-SENSITIVE")
 
 
 class TestChatService:
@@ -104,6 +116,66 @@ class TestChatService:
 
         assert "answer" in result
         assert "conversation_id" not in result
+
+    @pytest.mark.asyncio
+    async def test_chat_hides_llm_failure_details(self, mock_llm, caplog):
+        """LLM failures should expose only a stable public reason code."""
+        from app.services.chat_service import chat_service
+
+        sentinel = "sk-live-SENSITIVE https://internal.example request-id=secret-7F9C prompt=patient-data GROQ_API_KEY=.env Traceback"
+        unsafe_error = type("Secret\nInjected", (RuntimeError,), {"__str__": _reject_str})
+        mock_llm.generate_response.side_effect = unsafe_error(sentinel)
+
+        result = await chat_service.chat(query="test query")
+
+        assert result["answer"] == "⚠️ No pude generar una respuesta porque el servicio de IA no está disponible. Intentá nuevamente más tarde.\n\nCódigo: AI_SERVICE_UNAVAILABLE"
+        assert sentinel not in result["answer"] + caplog.text
+        assert not any(value in result["answer"] + caplog.text for value in ("sk-live", "internal.example", "secret-7F9C", "patient-data", "GROQ_API_KEY", ".env", "Traceback"))
+        diagnostic = next(record for record in caplog.records
+                          if record.getMessage() == "llm_generation_failed")
+        assert diagnostic.reason_code == "AI_SERVICE_UNAVAILABLE"
+        assert diagnostic.exception_class == "Exception"
+        assert len(diagnostic.correlation_id) == 32
+        assert diagnostic.exc_info is None
+
+    @pytest.mark.asyncio
+    async def test_stream_failure_emits_one_terminal_safe_error(self, mock_retriever, caplog):
+        """A failed stream ends with one safe event and is not persisted."""
+        from app.api.v1.chat import ChatRequest, create_chat_message_stream
+        from app.services.chat_service import logger
+
+        sentinel = "sk-live-STREAM-SENSITIVE"
+
+        malicious_error = type("Secret\nStream", (Exception,), {"__str__": _reject_str})
+
+        async def failing_stream(**kwargs):
+            yield "partial"
+            raise malicious_error(sentinel)
+
+        request = ChatRequest(query="test query")
+        http_request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(retriever=mock_retriever)))
+        handler = FailingHandler()
+        logger.addHandler(handler)
+        try:
+            with (
+                patch("app.api.v1.chat.rerank", side_effect=lambda query, documents: documents),
+                patch("app.api.v1.chat.llm_provider.generate_response_stream", new=failing_stream),
+                patch("app.db.postgres.async_session") as db_session,
+            ):
+                response = await create_chat_message_stream(
+                    request, http_request, current_user=SimpleNamespace(id="user-1"))
+                chunks = [chunk async for chunk in response.body_iterator]
+        finally:
+            logger.removeHandler(handler)
+
+        assert json.loads(chunks[0][6:]) == {"token": "partial"}
+        error = json.loads(chunks[1][6:])["error"]
+        assert error["code"] == "AI_SERVICE_UNAVAILABLE"
+        assert error["message"].endswith("Intentá nuevamente más tarde.")
+        assert len(error["correlation_id"]) == 32
+        assert all(secret not in "".join(chunks) + caplog.text for secret in (sentinel, "LOG-HANDLER-SENSITIVE", "Traceback"))
+        assert len(chunks) == 2 and all("[DONE]" not in chunk for chunk in chunks)
+        db_session.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_chat_with_area_filter(self, mock_retriever):
