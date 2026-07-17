@@ -46,6 +46,27 @@ class Retriever:
         self.read_mode, self.gate = read_mode, gate
         self._sparse_encoder = None
 
+    def evaluation_identity(self):
+        gate, expiry = self.gate, getattr(self.gate, "expires_at", None)
+        allowed = bool(gate and gate.allows_hybrid())
+        served = "hybrid" if self.read_mode == "hybrid" and allowed else (
+            "dense_fallback" if self.read_mode == "hybrid" else "dense")
+        return {
+            "class": f"{type(self).__module__}.{type(self).__qualname__}",
+            "configured_read_mode": self.read_mode, "served_mode": served,
+            "score_type": "rrf" if served == "hybrid" else "cosine",
+            "collections": {"dense": self.collection_name,
+                            "hybrid": settings.qdrant_hybrid_collection},
+            "vectors": {"dense": settings.qdrant_dense_vector_name,
+                        "sparse": settings.qdrant_sparse_vector_name},
+            "embedding_model": settings.embedding_model,
+            "hybrid": {"candidate_k": settings.retriever_hybrid_candidate_k,
+                       "timeout_seconds": settings.retriever_hybrid_timeout_seconds},
+            "gate": None if gate is None else {"allowed": allowed,
+                     "reason": getattr(gate, "reason", None),
+                     "expires_at": expiry.isoformat() if expiry else None},
+        }
+
     def _hybrid_search(self, query, query_vector, query_filter, limit):
         if self._sparse_encoder is None:
             self._sparse_encoder = SpanishBm25Encoder()
@@ -80,7 +101,7 @@ class Retriever:
                 "original_source_name", "original_source_path", "url", "doi", "isbn", "edition",
                 "publisher", "license", "rights", "author", "year", "publication_date",
                 "acquisition_date", "reviewer", "review_date", "review_due_date", "evidence_level",
-                "area", "population", "source_type", "university",
+                "area", "population", "source_type", "university", "chunk_index",
             )
             metadata = {key: res.payload[key] for key in metadata_fields
                         if key in res.payload and res.payload[key] is not None}
