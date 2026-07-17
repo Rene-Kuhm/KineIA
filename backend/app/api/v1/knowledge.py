@@ -1,15 +1,22 @@
 import os
 import tempfile
+from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
+from app.api.deps import get_database
 from app.config import settings
 from app.core.auth.dependencies import require_role
-from app.core.ingestion.pipeline import ingest_file
 from app.db.qdrant import qdrant_client
 from app.models.user import User
+from app.services.source_ingestion import (
+    InactiveSourceError,
+    ingest_trusted_file,
+)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -19,6 +26,12 @@ class IngestResponse(BaseModel):
     chunks: int
     file: str
     title: str
+
+
+def _save_upload(content: bytes, suffix: str) -> str:
+    with tempfile.NamedTemporaryFile(suffix=suffix, prefix="kineia_ingest_", delete=False) as tmp:
+        tmp.write(content)
+        return tmp.name
 
 
 @router.get("/stats")
@@ -74,14 +87,17 @@ async def knowledge_stats(
 @router.post("/ingest")
 async def ingest_document(
     file: UploadFile = File(...),
-    area: str | None = None,
-    source_type: str | None = None,
-    evidence_level: str | None = None,
-    title: str | None = None,
-    university: str | None = None,
-    author: str | None = None,
-    year: int | None = None,
-    source_key: str | None = None,
+    reviewer: str = Form(..., min_length=1, pattern=r".*\S.*"),
+    review_date: date = Form(...),
+    area: str | None = Form(None),
+    source_type: str | None = Form(None),
+    evidence_level: str | None = Form(None),
+    title: str | None = Form(None),
+    university: str | None = Form(None),
+    author: str | None = Form(None),
+    year: int | None = Form(None),
+    source_key: str | None = Form(None),
+    database: AsyncSession = Depends(get_database),
     current_user: User = Depends(require_role(["admin"])),
 ):
     """Ingest a document file into the knowledge base.
@@ -110,13 +126,7 @@ async def ingest_document(
             detail="Archivo vacío",
         )
 
-    with tempfile.NamedTemporaryFile(
-        suffix=suffix,
-        prefix="kineia_ingest_",
-        delete=False,
-    ) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
+    tmp_path = await run_in_threadpool(_save_upload, content, suffix)
 
     try:
         # Build metadata override
@@ -124,6 +134,8 @@ async def ingest_document(
             "original_source_name": original_filename,
             "original_source_path": original_filename,
             "identity_scope": "upload",
+            "reviewer": reviewer.strip(),
+            "review_date": review_date.isoformat(),
         }
         if source_key:
             metadata["source_key"] = source_key
@@ -142,23 +154,28 @@ async def ingest_document(
         if year:
             metadata["year"] = year
 
-        result = ingest_file(tmp_path, metadata_override=metadata)
+        result = await ingest_trusted_file(database, tmp_path, metadata)
         result["file"] = original_filename
 
         return {"status": "success", "data": result}
-    except ValueError as e:
+    except InactiveSourceError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Source is inactive",
+        ) from None
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-    except Exception as e:
+            detail="Invalid source metadata",
+        ) from None
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error en la ingesta: {str(e)}",
-        )
+            detail="Document ingestion could not be completed",
+        ) from None
     finally:
         # Clean up temp file
         try:
-            os.unlink(tmp_path)
+            await run_in_threadpool(os.unlink, tmp_path)
         except OSError:
             pass
