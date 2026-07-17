@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings
 
 
@@ -15,6 +17,7 @@ class Settings(BaseSettings):
     qdrant_hybrid_collection: str = "kineia_knowledge_v2"
     qdrant_dense_vector_name: str = "dense"
     qdrant_sparse_vector_name: str = "sparse"
+    qdrant_write_mode: Literal["legacy", "dual"] = "legacy"
 
     # LLM
     anthropic_api_key: str = ""
