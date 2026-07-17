@@ -1,17 +1,24 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from hashlib import blake2b
+from threading import Lock
+from weakref import WeakValueDictionary
 
 from app.core.ingestion.pipeline import (
-    cleanup_ingestion,
+    ingestion_operations,
     prepare_ingestion,
-    upsert_ingestion,
 )
 from app.models.source_ingestion_run import SourceIngestionRun
 from app.services.trusted_source_registry import register_trusted_source
+from asyncpg import connect as postgres_connect
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
+_LOCAL_LOCKS: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
+_LOCAL_LOCKS_GUARD = Lock()
 
 class InactiveSourceError(ValueError):
     pass
@@ -21,6 +28,54 @@ class IngestionFailureError(RuntimeError):
     def __init__(self, stage: str):
         self.stage = stage
         super().__init__("Document ingestion could not be completed")
+
+
+def _lock_key(source_id: str) -> int:
+    return int.from_bytes(blake2b(source_id.encode(), digest_size=8).digest(), "big", signed=True)
+
+
+def _local_lock(key: int) -> asyncio.Lock:
+    with _LOCAL_LOCKS_GUARD:
+        return _LOCAL_LOCKS.setdefault(key, asyncio.Lock())
+
+
+async def _close_postgres_lock(connection) -> None:
+    try:
+        await connection.close(timeout=2)
+    except BaseException:
+        try:
+            connection.terminate()
+        except Exception:
+            logger.error("Could not terminate ingestion coordination connection")
+        logger.error("Could not close ingestion coordination connection")
+
+
+@asynccontextmanager
+async def _source_lock(session: AsyncSession, source_id: str):
+    key = _lock_key(source_id)
+    if session.get_bind().dialect.name != "postgresql":
+        async with _local_lock(key):
+            yield
+        return
+    connection = None
+    try:
+        url = session.get_bind().url.set(drivername="postgresql")
+        connection = await postgres_connect(
+            url.render_as_string(hide_password=False),
+            server_settings={"application_name": "kineia-source-ingestion-lock"},
+        )
+        await connection.execute("SELECT pg_advisory_lock($1)", key)
+    except BaseException as error:
+        if connection is not None:
+            await asyncio.shield(_close_postgres_lock(connection))
+        if isinstance(error, Exception):
+            logger.error("Could not acquire ingestion coordination lock")
+            raise IngestionFailureError("source_lock") from None
+        raise
+    try:
+        yield
+    finally:
+        await asyncio.shield(_close_postgres_lock(connection))
 
 
 async def _rollback_safely(session: AsyncSession) -> None:
@@ -44,6 +99,11 @@ async def ingest_trusted_file(session: AsyncSession, file_path: str, metadata: d
     prepared = await run_in_threadpool(prepare_ingestion, file_path, metadata)
     if isinstance(prepared, dict):
         return prepared
+    async with _source_lock(session, prepared.provenance.source_id):
+        return await _ingest_prepared(session, prepared)
+
+
+async def _ingest_prepared(session: AsyncSession, prepared) -> dict:
     try:
         source = await register_trusted_source(session, prepared.provenance)
         if not source.is_active:
@@ -68,8 +128,7 @@ async def ingest_trusted_file(session: AsyncSession, file_path: str, metadata: d
             raise
         raise IngestionFailureError("sql_prepare") from None
 
-    operations = (("qdrant_upsert", upsert_ingestion), ("qdrant_cleanup", cleanup_ingestion))
-    for stage, operation in operations:
+    for stage, operation in ingestion_operations():
         try:
             await run_in_threadpool(operation, prepared)
         except Exception:
