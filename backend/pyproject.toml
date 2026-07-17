@@ -17,6 +17,7 @@ dependencies = [
     "asyncpg>=0.30.0",
     "psycopg2-binary>=2.9.10",
     "qdrant-client==1.18.0",
+    "fastembed==0.8.0",
     "langchain>=0.3.7",
     "langchain-anthropic>=0.3.0",
     "langchain-community>=0.3.7",

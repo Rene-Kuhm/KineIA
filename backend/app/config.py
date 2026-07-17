@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     # Qdrant
     qdrant_url: str = "http://qdrant:6333"
     qdrant_collection: str = "kineia_knowledge"
+    qdrant_hybrid_collection: str = "kineia_knowledge_v2"
+    qdrant_dense_vector_name: str = "dense"
+    qdrant_sparse_vector_name: str = "sparse"
 
     # LLM
     anthropic_api_key: str = ""
