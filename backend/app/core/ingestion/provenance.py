@@ -4,19 +4,43 @@ from dataclasses import asdict, dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _DOI_PATTERN = re.compile(r"^10\.\d{4,9}/\S+$")
+_PATH_PATTERN = re.compile(r"^(?:[A-Za-z]:|file:|[/\\])", re.I)
 _OPTIONAL_FIELDS = (
     "edition", "publisher", "license", "rights", "author", "acquisition_date", "reviewer",
     "review_date", "review_due_date", "evidence_level", "area", "population", "source_type",
 )
 
 
-def _text(value: object) -> str | None:
-    normalized = " ".join(str(value).strip().split()) if value is not None else ""
-    return normalized or None
+def _text(value: object, max_length: int = 2048) -> str | None:
+    normalized = str(value).strip() if value is not None else ""
+    if not normalized or len(normalized) > max_length:
+        return None
+    return normalized if all(char.isprintable() for char in normalized) else None
 
 
-def _normalize_doi(value: object) -> str | None:
-    doi = _text(value)
+def safe_citation_text(
+    value: object, max_length=2048, *, path_safe=False, no_whitespace=False,
+) -> str | None:
+    if no_whitespace and value is not None and any(char.isspace() for char in str(value)):
+        return None
+    text = _text(value, max_length) if isinstance(value, str) else None
+    if path_safe and text and (_PATH_PATTERN.match(text) or "/" in text or "\\" in text):
+        return None
+    return text
+
+
+def safe_source_name(value: object) -> str | None:
+    raw = _text(value) if isinstance(value, str) else None
+    basename = raw.replace("\\", "/").rsplit("/", 1)[-1] if raw else None
+    return safe_citation_text(basename, 255, path_safe=True)
+
+
+def safe_citation_title(value: object, fallback: object = None) -> str | None:
+    return safe_citation_text(value, 500, path_safe=True) or safe_source_name(fallback)
+
+
+def normalize_doi(value: object) -> str | None:
+    doi = _text(value, 255) if isinstance(value, str) else None
     if not doi:
         return None
     doi = re.sub(r"^(?:doi:\s*|https?://(?:dx\.)?doi\.org/)", "", doi, flags=re.I)
@@ -24,8 +48,11 @@ def _normalize_doi(value: object) -> str | None:
     return doi if _DOI_PATTERN.fullmatch(doi) else None
 
 
-def _normalize_isbn(value: object) -> str | None:
-    isbn = re.sub(r"[^0-9Xx]", "", str(value or "")).upper()
+def normalize_isbn(value: object) -> str | None:
+    raw = _text(value, 32)
+    if not raw or not re.fullmatch(r"[0-9Xx -]+", raw):
+        return None
+    isbn = re.sub(r"[^0-9Xx]", "", raw).upper()
     if len(isbn) == 10:
         total = sum((10 - i) * (10 if char == "X" else int(char)) for i, char in enumerate(isbn))
         return isbn if total % 11 == 0 else None
@@ -35,14 +62,15 @@ def _normalize_isbn(value: object) -> str | None:
     return None
 
 
-def _normalize_url(value: object) -> str | None:
-    raw = _text(value)
-    if not raw:
+def normalize_citation_url(value: object) -> str | None:
+    raw = _text(value) if isinstance(value, str) else None
+    if not raw or "\\" in raw or any(char.isspace() for char in str(value)):
         return None
     try:
         parsed = urlsplit(raw)
         scheme = parsed.scheme.casefold()
-        if scheme not in {"http", "https"} or not parsed.hostname:
+        if (scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None):
             return None
         host = parsed.hostname.casefold()
         if ":" in host:
@@ -52,7 +80,8 @@ def _normalize_url(value: object) -> str | None:
             host = f"{host}:{port}"
         path = parsed.path.rstrip("/") or ""
         query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
-        return urlunsplit((scheme, host, path, query, ""))
+        normalized = urlunsplit((scheme, host, path, query, ""))
+        return normalized if len(normalized) <= 2048 else None
     except ValueError:
         return None
 
@@ -88,11 +117,14 @@ class SourceProvenance:
     def from_content(cls, content: bytes | str, metadata: dict) -> "SourceProvenance":
         raw_content = content.encode("utf-8") if isinstance(content, str) else content
         content_hash = hashlib.sha256(raw_content).hexdigest()
-        doi = _normalize_doi(metadata.get("doi"))
-        isbn = _normalize_isbn(metadata.get("isbn"))
-        url = _normalize_url(metadata.get("url") or metadata.get("canonical_url"))
+        doi = normalize_doi(metadata.get("doi"))
+        isbn = normalize_isbn(metadata.get("isbn"))
+        url = normalize_citation_url(metadata.get("url") or metadata.get("canonical_url"))
         source_key = _text(metadata.get("source_key"))
-        original_name = _text(metadata.get("original_source_name") or metadata.get("file_name"))
+        original_name = (
+            safe_source_name(metadata.get("original_source_name"))
+            or safe_source_name(metadata.get("file_name"))
+        )
         original_path = _text(
             metadata.get("original_source_path") or metadata.get("source_file") or original_name
         )
@@ -114,7 +146,13 @@ class SourceProvenance:
             source_id = f"source:{hashlib.sha256(source_key.encode()).hexdigest()}"
         explicit_version = _text(metadata.get("version"))
         values = {field: _text(metadata.get(field)) for field in _OPTIONAL_FIELDS}
-        values["publication_date"] = _text(metadata.get("publication_date") or metadata.get("date"))
+        for field in ("acquisition_date", "review_date", "review_due_date"):
+            values[field] = safe_citation_text(metadata.get(field), 64, no_whitespace=True)
+        values["evidence_level"] = safe_citation_text(metadata.get("evidence_level"), 100)
+        values["publication_date"] = safe_citation_text(
+            metadata.get("publication_date") or metadata.get("date"), 64,
+            no_whitespace=True,
+        )
         raw_year = _text(metadata.get("year"))
         year = int(raw_year) if raw_year and raw_year.lstrip("+-").isdigit() else None
         source_version = explicit_version or f"sha256:{content_hash}"
@@ -135,4 +173,7 @@ class SourceProvenance:
         )
 
     def payload(self) -> dict:
-        return {key: value for key, value in asdict(self).items() if value is not None}
+        return {
+            key: value for key, value in asdict(self).items()
+            if value is not None and key != "original_source_path"
+        }
