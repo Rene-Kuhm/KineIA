@@ -64,6 +64,8 @@ export default function AdminPage() {
   const [area, setArea] = useState("");
   const [level, setLevel] = useState("protocol");
   const [title, setTitle] = useState("");
+  const [reviewer, setReviewer] = useState("");
+  const [reviewDate, setReviewDate] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
@@ -103,7 +105,7 @@ export default function AdminPage() {
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !area) return;
+    if (!file || !area || !reviewer.trim() || !reviewDate) return;
 
     setUploading(true);
     setUploadError(null);
@@ -113,6 +115,8 @@ export default function AdminPage() {
     formData.append("file", file);
     formData.append("area", area);
     formData.append("evidence_level", level);
+    formData.append("reviewer", reviewer.trim());
+    formData.append("review_date", reviewDate);
     if (title.trim()) {
       formData.append("title", title.trim());
     }
@@ -128,6 +132,8 @@ export default function AdminPage() {
       setTitle("");
       setArea("");
       setLevel("protocol");
+      setReviewer("");
+      setReviewDate("");
 
       // Reset file input
       const fileInput = document.getElementById("doc-upload") as HTMLInputElement;
@@ -295,7 +301,7 @@ export default function AdminPage() {
               <input
                 id="doc-upload"
                 type="file"
-                accept=".pdf,.txt,.md,.docx"
+                accept=".pdf,.txt,.md,.markdown"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
                 className="block w-full text-sm text-slate-500 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-100 dark:file:bg-slate-700 file:text-slate-700 dark:file:text-slate-300 hover:file:bg-slate-200 dark:hover:file:bg-slate-600 file:transition-colors file:cursor-pointer cursor-pointer"
               />
@@ -319,6 +325,35 @@ export default function AdminPage() {
                 placeholder="Ej: Manual de anatomía funcional"
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-400 dark:focus:ring-violet-600 text-sm"
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="doc-reviewer" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Profesional revisor/a *
+                </label>
+                <input
+                  id="doc-reviewer"
+                  type="text"
+                  value={reviewer}
+                  onChange={(e) => setReviewer(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-400 dark:focus:ring-violet-600 text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor="doc-review-date" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Fecha de revisión *
+                </label>
+                <input
+                  id="doc-review-date"
+                  type="date"
+                  value={reviewDate}
+                  onChange={(e) => setReviewDate(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-400 dark:focus:ring-violet-600 text-sm"
+                />
+              </div>
             </div>
 
             {/* Area select */}
@@ -373,7 +408,7 @@ export default function AdminPage() {
             <div className="flex items-center gap-3 pt-2">
               <button
                 type="submit"
-                disabled={!file || !area || uploading}
+                disabled={!file || !area || !reviewer.trim() || !reviewDate || uploading}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
                   "bg-violet-600 dark:bg-violet-500 text-white hover:bg-violet-700 dark:hover:bg-violet-600",

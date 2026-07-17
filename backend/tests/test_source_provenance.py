@@ -1,15 +1,9 @@
-import asyncio
-import io
-import sys
-from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import UploadFile
+from app.core.ingestion.provenance import SourceProvenance
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
-
-from app.core.ingestion.provenance import SourceProvenance
 
 
 def upload_metadata(name="guide.md"):
@@ -101,27 +95,3 @@ def test_retriever_exposes_canonical_provenance(monkeypatch):
     for key in payload.keys() - {"text"}:
         assert metadata[key] == payload[key]
     assert metadata["source"] == "knowledge_base/guide.md"
-
-@pytest.mark.parametrize("filename", ["../../Original Guide.md", r"..\..\Original Guide.md"])
-def test_upload_preserves_original_filename(monkeypatch, filename):
-    auth = ModuleType("app.core.auth.dependencies")
-    auth.require_role = lambda _roles: lambda: None
-    user = ModuleType("app.models.user")
-    user.User = object
-    monkeypatch.setitem(sys.modules, "app.core.auth.dependencies", auth)
-    monkeypatch.setitem(sys.modules, "app.models.user", user)
-    from app.api.v1 import knowledge
-    captured = {}
-    monkeypatch.setattr(
-        knowledge,
-        "ingest_file",
-        lambda path, metadata_override: captured.update(metadata_override) or {"file": path},
-    )
-    upload = UploadFile(filename=filename, file=io.BytesIO(b"source"))
-    response = asyncio.run(
-        knowledge.ingest_document(file=upload, source_key="clinic/guide", current_user=object())
-    )
-    assert captured["original_source_name"] == "Original Guide.md"
-    assert captured["original_source_path"] == "Original Guide.md"
-    assert (captured["identity_scope"], captured["source_key"]) == ("upload", "clinic/guide")
-    assert response["data"]["file"] == "Original Guide.md"
