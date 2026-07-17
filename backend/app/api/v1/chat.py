@@ -16,6 +16,7 @@ from app.services.chat_service import (
     chat_service,
     record_llm_failure,
 )
+from app.services.rag.citations import format_sources
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -93,19 +94,7 @@ async def create_chat_message_stream(
         response_time_ms = int((time.time() - start_time) * 1000)
 
         # 3. Format and send sources
-        sources = []
-        for doc in docs:
-            metadata = doc.get("metadata", {})
-            sources.append(
-                {
-                    "title": metadata.get("title", "Desconocido"),
-                    "source": metadata.get("source", "Desconocido"),
-                    "evidence_level": metadata.get("evidence_level", "unknown"),
-                    "score": doc.get("score", 0.0),
-                    "retrieval_mode": doc.get("retrieval_mode", "dense"),
-                    "score_type": doc.get("score_type", "cosine"),
-                }
-            )
+        sources = format_sources(docs)
 
         yield f"data: {json.dumps({'sources': sources})}\n\n"
 
