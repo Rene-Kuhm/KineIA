@@ -8,12 +8,12 @@ def extract_pdf(file_path: str) -> dict:
     try:
         import fitz  # PyMuPDF
 
-        doc = fitz.open(str(path))
-        text_parts = []
-        for page in doc:
-            text_parts.append(page.get_text())
-        doc.close()
-        text = "\n\n".join(text_parts)
+        with fitz.open(str(path)) as doc:
+            pages = [
+                {"page_number": number, "text": page.get_text()}
+                for number, page in enumerate(doc, start=1)
+            ]
+        text = "\n\n".join(page["text"] for page in pages)
     except ImportError:
         raise ImportError(
             "PyMuPDF (fitz) is required for PDF extraction. "
@@ -22,6 +22,7 @@ def extract_pdf(file_path: str) -> dict:
 
     return {
         "text": text.strip(),
+        "pages": pages,
         "metadata": {},
         "source_file": str(path),
         "file_name": path.name,

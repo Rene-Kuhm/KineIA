@@ -97,8 +97,6 @@ async def _mark_failed(session: AsyncSession, run: SourceIngestionRun, stage: st
 
 async def ingest_trusted_file(session: AsyncSession, file_path: str, metadata: dict) -> dict:
     prepared = await run_in_threadpool(prepare_ingestion, file_path, metadata)
-    if isinstance(prepared, dict):
-        return prepared
     async with _source_lock(session, prepared.provenance.source_id):
         return await _ingest_prepared(session, prepared)
 
@@ -128,7 +126,7 @@ async def _ingest_prepared(session: AsyncSession, prepared) -> dict:
             raise
         raise IngestionFailureError("sql_prepare") from None
 
-    for stage, operation in ingestion_operations():
+    for stage, operation in ingestion_operations(prepared):
         try:
             await run_in_threadpool(operation, prepared)
         except Exception:
