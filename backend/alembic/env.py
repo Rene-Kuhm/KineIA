@@ -1,12 +1,15 @@
 from logging.config import fileConfig
 
 from alembic import context
+from app.config import settings
+from app.db.postgres import Base
+from app.models import Conversation, Document, Message, User  # noqa: F401
+from app.models.trusted_source import TrustedSource  # noqa: F401
 from sqlalchemy import engine_from_config, pool
 
-from app.db.postgres import Base
-from app.models import User, Conversation, Message, Document  # noqa: F401
-
 config = context.config
+database_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
