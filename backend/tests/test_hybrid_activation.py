@@ -74,7 +74,10 @@ def test_eligible_hybrid_serves_rrf_with_provenance(monkeypatch):
     monkeypatch.setattr(module, "SpanishBm25Encoder", lambda: encoder)
     monkeypatch.setattr(module, "generate_embedding", lambda _query: [0.1] * 1024)
     monkeypatch.setattr(module.settings, "qdrant_hybrid_collection", "hybrid")
-    gate = HybridGate(NOW + timedelta(minutes=10), "ready")
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    gate = HybridGate(expires_at, "ready")
+    assert gate.allows_hybrid(expires_at - timedelta(microseconds=1))
+    assert not gate.allows_hybrid(expires_at)
     docs = module.Retriever(client=client, read_mode="hybrid", gate=gate).search("x", area="x")
     call = client.query_points.call_args.kwargs
     assert call["collection_name"] == "hybrid" and call["query"].fusion is Fusion.RRF
