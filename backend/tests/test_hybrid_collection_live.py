@@ -3,9 +3,17 @@ import uuid
 
 import pytest
 from app.core.ingestion import pipeline
+from app.db.hybrid_backfill import backfill_hybrid, verify_hybrid
 from app.db.hybrid_collection import provision_hybrid_collection
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import (
+    Distance,
+    Modifier,
+    PointStruct,
+    SparseVector,
+    SparseVectorParams,
+    VectorParams,
+)
 
 
 def test_live_hybrid_provisioning_is_exact_and_idempotent():
@@ -64,6 +72,56 @@ def test_live_dual_write_converges_and_removes_stale_points(tmp_path, monkeypatc
         assert (old[0].id, old[0].payload) == (new[0].id, new[0].payload)
         assert new[0].payload["text"] == "Rehabilitación actualizada de hombro."
         assert set(new[0].vector) == {"dense", "sparse"}
+    finally:
+        for collection in (legacy, hybrid):
+            if client.collection_exists(collection):
+                client.delete_collection(collection)
+
+def test_live_backfill_resumes_is_idempotent_and_never_overwrites():
+    if os.getenv("QDRANT_INTEGRATION") != "1":
+        pytest.skip("QDRANT_INTEGRATION=1 is required")
+    client = QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+                          check_compatibility=False)
+    suffix = uuid.uuid4().hex
+    legacy, hybrid = f"legacy_{suffix}", f"hybrid_{suffix}"
+    class Encoder:
+        def encode(self, _text):
+            return SparseVector(indices=[1], values=[1.0])
+    try:
+        client.create_collection(collection_name=legacy,
+                                 vectors_config=VectorParams(size=2, distance=Distance.COSINE))
+        client.create_collection(
+            collection_name=hybrid,
+            vectors_config={"dense": VectorParams(size=2, distance=Distance.COSINE)},
+            sparse_vectors_config={"sparse": SparseVectorParams(modifier=Modifier.IDF)},
+        )
+        ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, f"kineia:{i}")) for i in range(1, 4)]
+        legacy_points = [PointStruct(id=point_id, vector=[i / 10, 0.2],
+                                     payload={"text": f"legacy {i}"})
+                         for i, point_id in enumerate(ids, 1)]
+        client.upsert(legacy, legacy_points)
+        client.upsert(hybrid, [PointStruct(id=ids[0], payload={"text": "newer dual write"},
+                                          vector={"dense": [0.9, 0.9],
+                                                  "sparse": Encoder().encode("")})])
+        kwargs = dict(legacy=legacy, hybrid=hybrid, dense_name="dense", sparse_name="sparse",
+                      dimensions=2, encoder=Encoder(), page_size=1)
+        partial = backfill_hybrid(client, **kwargs, max_pages=1)
+        completed = backfill_hybrid(client, **kwargs, offset=partial["next_offset"])
+        backfill_hybrid(client, **kwargs)
+        protected = client.retrieve(hybrid, [ids[0]], with_payload=True, with_vectors=True)[0]
+        report = verify_hybrid(client, legacy=legacy, hybrid=hybrid,
+                               dense_name="dense", sparse_name="sparse", dimensions=2, page_size=1)
+        page_two = verify_hybrid(
+            client, legacy=legacy, hybrid=hybrid, dense_name="dense",
+            sparse_name="sparse", dimensions=2, page_size=2)
+        assert partial["next_offset"] is not None and completed["next_offset"] is None
+        assert (partial["processed"], completed["processed"]) == (1, 2)
+        assert protected.payload == {"text": "newer dual write"}
+        assert report["counts"] == {"legacy": 3, "v2": 3}
+        assert not report["ready"] and report["missing_ids"] == report["orphan_ids"] == []
+        assert report == page_two
+        assert {error["code"] for error in report["errors"]} >= {
+            "payload_mismatch", "dense_mismatch"}
     finally:
         for collection in (legacy, hybrid):
             if client.collection_exists(collection):
