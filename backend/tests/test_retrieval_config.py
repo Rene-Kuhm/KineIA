@@ -18,3 +18,9 @@ def test_shadow_limit_boundaries_are_valid():
                           retriever_hybrid_timeout_seconds=1)
     assert (configured.retriever_hybrid_candidate_k,
             configured.retriever_hybrid_timeout_seconds) == (100, 1)
+
+
+def test_read_mode_defaults_dense_and_readiness_secret_is_redacted():
+    configured = Settings(_env_file=None, hybrid_readiness_hmac_key="private-readiness-key")
+    assert configured.retriever_read_mode == "dense"
+    assert "private-readiness-key" not in repr(configured.hybrid_readiness_hmac_key)
