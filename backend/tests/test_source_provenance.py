@@ -9,10 +9,7 @@ from fastapi import UploadFile
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
-sentence_transformers = ModuleType("sentence_transformers")
-sentence_transformers.SentenceTransformer = object
-sys.modules.setdefault("sentence_transformers", sentence_transformers)
-from app.core.ingestion.provenance import SourceProvenance  # noqa: E402
+from app.core.ingestion.provenance import SourceProvenance
 
 
 def upload_metadata(name="guide.md"):
