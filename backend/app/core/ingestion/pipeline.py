@@ -44,7 +44,7 @@ def _original_source_path(path: Path) -> str:
 
 def prepare_ingestion(
     file_path: str, metadata_override: dict | None = None
-) -> PreparedIngestion | dict:
+) -> PreparedIngestion:
     """Extract, chunk, and embed a file without mutating Qdrant."""
     path = Path(file_path)
 
@@ -66,18 +66,30 @@ def prepare_ingestion(
     title = safe_citation_title(file_metadata.get("title"), provenance.original_source_name)
 
     # 2. Chunk
-    chunks = chunk_text(
-        text,
-        chunk_size=settings.chunk_size,
-        chunk_overlap=settings.chunk_overlap,
-    )
-
-    if not chunks:
-        return {"status": "empty", "chunks": 0, "file": file_path}
+    if "pages" in extracted:
+        chunks = []
+        for page in extracted["pages"]:
+            if not page["text"].strip():
+                continue
+            page_chunks = chunk_text(
+                page["text"], chunk_size=settings.chunk_size,
+                chunk_overlap=settings.chunk_overlap,
+            )
+            for chunk in page_chunks:
+                chunk.update({
+                    "page_start": page["page_number"], "page_end": page["page_number"],
+                    "section_heading": None, "section_path": None,
+                })
+            chunks.extend(page_chunks)
+    else:
+        chunks = chunk_text(
+            text, chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+        )
 
     # 3. Embed
     chunk_texts = [c["text"] for c in chunks]
-    embeddings = generate_embeddings(chunk_texts)
+    embeddings = generate_embeddings(chunk_texts) if chunk_texts else []
 
     # 4. Build points for Qdrant
     points = []
@@ -96,8 +108,8 @@ def prepare_ingestion(
             "fragment_hash": chunk_hash,
             "section_heading": chunk.get("section_heading"),
             "section_path": chunk.get("section_path"),
-            "page_start": None,
-            "page_end": None,
+            "page_start": chunk.get("page_start"),
+            "page_end": chunk.get("page_end"),
             "title": title,
         }
         if file_metadata.get("university"):
@@ -105,7 +117,7 @@ def prepare_ingestion(
         points.append(PointStruct(id=point_id, vector=embedding, payload=payload))
 
     result = {
-        "status": "success",
+        "status": "success" if chunks else "empty",
         "chunks": len(chunks),
         "file": provenance.original_source_path,
         "title": title,
@@ -130,6 +142,7 @@ def cleanup_ingestion(prepared: PreparedIngestion) -> None:
 
 
 def _cleanup_collection(collection_name: str, prepared: PreparedIngestion) -> None:
+    point_ids = [point.id for point in prepared.points]
     qdrant_client.delete(
         collection_name=collection_name,
         points_selector=FilterSelector(
@@ -140,9 +153,7 @@ def _cleanup_collection(collection_name: str, prepared: PreparedIngestion) -> No
                         match=MatchValue(value=prepared.provenance.source_id),
                     )
                 ],
-                must_not=[
-                    HasIdCondition(has_id=[point.id for point in prepared.points])
-                ],
+                must_not=[HasIdCondition(has_id=point_ids)] if point_ids else None,
             )
         ),
         wait=True,
@@ -184,8 +195,13 @@ def cleanup_hybrid_ingestion(prepared: PreparedIngestion) -> None:
     _cleanup_collection(settings.qdrant_hybrid_collection, prepared)
 
 
-def ingestion_operations():
+def ingestion_operations(prepared: PreparedIngestion):
     legacy = (("legacy_upsert", upsert_ingestion), ("legacy_cleanup", cleanup_ingestion))
+    if not prepared.points:
+        cleanups = (("legacy_cleanup", cleanup_ingestion),)
+        return cleanups if settings.qdrant_write_mode == "legacy" else (
+            *cleanups, ("hybrid_cleanup", cleanup_hybrid_ingestion),
+        )
     if settings.qdrant_write_mode == "legacy":
         return legacy
     return (
@@ -198,9 +214,7 @@ def ingestion_operations():
 def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
     """Full ingestion pipeline: extract → chunk → embed → upsert to Qdrant."""
     prepared = prepare_ingestion(file_path, metadata_override)
-    if isinstance(prepared, dict):
-        return prepared
-    for _stage, operation in ingestion_operations():
+    for _stage, operation in ingestion_operations(prepared):
         operation(prepared)
     return prepared.result
 
