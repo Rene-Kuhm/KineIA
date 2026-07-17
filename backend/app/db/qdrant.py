@@ -4,10 +4,11 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
 from app.config import settings
+from app.db.qdrant_preflight import describe_vectors, is_legacy_compatible
 
 logger = logging.getLogger(__name__)
 
-qdrant_client = QdrantClient(url=settings.qdrant_url)
+qdrant_client = QdrantClient(url=settings.qdrant_url, check_compatibility=False)
 
 
 async def init_qdrant_collection():
@@ -32,26 +33,21 @@ async def init_qdrant_collection():
 
     # Collection exists — verify dimension compatibility
     existing = qdrant_client.get_collection(settings.qdrant_collection)
-    existing_size = existing.config.params.vectors.size
-
-    if existing_size != settings.embedding_dimensions:
-        logger.warning(
-            "⚠️  Qdrant collection '%s' has %d dimensions but config expects %d. "
-            "Upserts will FAIL. Run: docker compose exec backend python -c \""
-            "from app.db.qdrant import qdrant_client; "
-            "qdrant_client.delete_collection('%s'); "
-            "print('Collection deleted. Restart to recreate.')\"",
-            settings.qdrant_collection,
-            existing_size,
-            settings.embedding_dimensions,
-            settings.qdrant_collection,
+    vector_report = describe_vectors(existing.config.params.vectors)
+    if not is_legacy_compatible(vector_report, settings.embedding_dimensions):
+        raise RuntimeError(
+            f"Qdrant collection '{settings.qdrant_collection}' is incompatible: "
+            f"expected one unnamed {settings.embedding_dimensions}-dimensional "
+            "Cosine vector; found "
+            f"{vector_report}. "
+            "No collection changes were made."
         )
-    else:
-        logger.info(
-            "Qdrant collection '%s' ready (%d dimensions)",
-            settings.qdrant_collection,
-            existing_size,
-        )
+    existing_size = vector_report["dimensions"]
+    logger.info(
+        "Qdrant collection '%s' ready (%d dimensions)",
+        settings.qdrant_collection,
+        existing_size,
+    )
 
 
 def get_qdrant():
