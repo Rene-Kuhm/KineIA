@@ -1,7 +1,6 @@
 """Create trusted source registry."""
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision: str = "20260716_0001"

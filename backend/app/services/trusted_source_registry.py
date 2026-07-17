@@ -1,9 +1,8 @@
 from datetime import date
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.ingestion.provenance import SourceProvenance
 from app.models.trusted_source import TrustedSource
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _DATE_FIELDS = ("publication_date", "acquisition_date", "review_due_date")
 _OPTIONAL_FIELDS = (

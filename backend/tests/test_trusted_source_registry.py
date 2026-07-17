@@ -2,11 +2,10 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from app.core.ingestion.provenance import SourceProvenance
 from app.models.trusted_source import TrustedSource
 from app.services.trusted_source_registry import get_trusted_source, register_trusted_source
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 pytestmark = pytest.mark.asyncio
 
