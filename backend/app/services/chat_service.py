@@ -5,14 +5,13 @@ import time
 import uuid
 from datetime import datetime
 
-from sqlalchemy import delete, select
-
 from app.core.llm.provider import llm_provider
 from app.core.rag.reranker import rerank
 from app.db.postgres import async_session
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.rag.retriever import retriever
+from sqlalchemy import delete, select
 
 logger = logging.getLogger(__name__)
 
