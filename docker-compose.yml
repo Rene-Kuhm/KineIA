@@ -33,6 +33,9 @@ services:
       - DATABASE_URL=postgresql://kineia:${DB_PASSWORD}@postgres:5432/kineia
       - QDRANT_URL=http://qdrant:6333
       - QDRANT_COLLECTION=kineia_knowledge
+      - QDRANT_HYBRID_COLLECTION=${QDRANT_HYBRID_COLLECTION:-kineia_knowledge_v2}
+      - QDRANT_DENSE_VECTOR_NAME=${QDRANT_DENSE_VECTOR_NAME:-dense}
+      - QDRANT_SPARSE_VECTOR_NAME=${QDRANT_SPARSE_VECTOR_NAME:-sparse}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
