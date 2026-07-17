@@ -122,8 +122,12 @@ def upsert_ingestion(prepared: PreparedIngestion) -> None:
 
 
 def cleanup_ingestion(prepared: PreparedIngestion) -> None:
+    _cleanup_collection(settings.qdrant_collection, prepared)
+
+
+def _cleanup_collection(collection_name: str, prepared: PreparedIngestion) -> None:
     qdrant_client.delete(
-        collection_name=settings.qdrant_collection,
+        collection_name=collection_name,
         points_selector=FilterSelector(
             filter=Filter(
                 must=[
@@ -141,13 +145,59 @@ def cleanup_ingestion(prepared: PreparedIngestion) -> None:
     )
 
 
+def validate_hybrid_ingestion(_prepared: PreparedIngestion) -> None:
+    from app.db.hybrid_collection import hybrid_collection_is_compatible
+
+    if not hybrid_collection_is_compatible(
+        qdrant_client, collection_name=settings.qdrant_hybrid_collection,
+        dense_name=settings.qdrant_dense_vector_name,
+        sparse_name=settings.qdrant_sparse_vector_name,
+        dimensions=settings.embedding_dimensions,
+    ):
+        raise RuntimeError("Hybrid collection is not provisioned with the exact schema")
+
+
+def upsert_hybrid_ingestion(prepared: PreparedIngestion) -> None:
+    from app.core.rag.sparse_encoder import SpanishBm25Encoder
+
+    encoder = SpanishBm25Encoder()
+    points = [
+        PointStruct(
+            id=point.id, payload=point.payload,
+            vector={
+                settings.qdrant_dense_vector_name: point.vector,
+                settings.qdrant_sparse_vector_name: encoder.encode(point.payload["text"]),
+            },
+        )
+        for point in prepared.points
+    ]
+    qdrant_client.upsert(
+        collection_name=settings.qdrant_hybrid_collection, points=points, wait=True
+    )
+
+
+def cleanup_hybrid_ingestion(prepared: PreparedIngestion) -> None:
+    _cleanup_collection(settings.qdrant_hybrid_collection, prepared)
+
+
+def ingestion_operations():
+    legacy = (("legacy_upsert", upsert_ingestion), ("legacy_cleanup", cleanup_ingestion))
+    if settings.qdrant_write_mode == "legacy":
+        return legacy
+    return (
+        ("hybrid_validate", validate_hybrid_ingestion), *legacy,
+        ("hybrid_upsert", upsert_hybrid_ingestion),
+        ("hybrid_cleanup", cleanup_hybrid_ingestion),
+    )
+
+
 def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
     """Full ingestion pipeline: extract → chunk → embed → upsert to Qdrant."""
     prepared = prepare_ingestion(file_path, metadata_override)
     if isinstance(prepared, dict):
         return prepared
-    upsert_ingestion(prepared)
-    cleanup_ingestion(prepared)
+    for _stage, operation in ingestion_operations():
+        operation(prepared)
     return prepared.result
 
 

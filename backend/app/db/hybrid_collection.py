@@ -49,6 +49,18 @@ def _inspect_schema(
     return observed, compatible, missing
 
 
+def hybrid_collection_is_compatible(
+    client: QdrantClient, *, collection_name: str, dense_name: str,
+    sparse_name: str, dimensions: int,
+) -> bool:
+    if not client.collection_exists(collection_name):
+        return False
+    _observed, compatible, missing = _inspect_schema(
+        client.get_collection(collection_name), dense_name, sparse_name, dimensions
+    )
+    return compatible and not missing
+
+
 def provision_hybrid_collection(
     client: QdrantClient,
     *,

@@ -20,15 +20,19 @@ def test_root_command_and_custom_hybrid_configuration(tmp_path):
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     command = "uv run --project backend --no-sync python backend/scripts/provision_hybrid.py"
     assert command in env_example
+    assert "QDRANT_WRITE_MODE=legacy" in env_example
+    assert "- QDRANT_WRITE_MODE=${QDRANT_WRITE_MODE:-legacy}" in compose
     keys = "qdrant_hybrid_collection qdrant_dense_vector_name qdrant_sparse_vector_name".split()
     assert all(f"- {key.upper()}=${{{key.upper()}:-" in compose for key in keys)
     env = tmp_path / ".env"
     env.write_text(
         "QDRANT_HYBRID_COLLECTION=custom\nQDRANT_DENSE_VECTOR_NAME=d\n"
-        "QDRANT_SPARSE_VECTOR_NAME=s\n"
+        "QDRANT_SPARSE_VECTOR_NAME=s\nQDRANT_WRITE_MODE=dual\n"
     )
     settings = Settings(_env_file=env)
     assert [getattr(settings, key) for key in keys] == ["custom", "d", "s"]
+    modes = settings.qdrant_write_mode, Settings(_env_file=None).qdrant_write_mode
+    assert modes == ("dual", "legacy")
 
 
 def provision(client, collection="knowledge_v2"):
