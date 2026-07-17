@@ -4,10 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from qdrant_client.models import Fusion, SparseVector
-
 from app.config import Settings
 from app.db.hybrid_readiness import create_attestation
+from qdrant_client.models import Fusion, SparseVector
 
 NOW = datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
 SECRET = "h" * 32
