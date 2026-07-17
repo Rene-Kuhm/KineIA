@@ -127,6 +127,20 @@ async def test_legacy_mode_never_loads_sparse_encoder_or_calls_hybrid(case, monk
     assert case.client.upsert.call_args.kwargs["collection_name"] == collection
     assert case.client.delete.call_args.kwargs["collection_name"] == collection
     assert isinstance(case.client.upsert.call_args.kwargs["points"][0].vector, list)
+async def test_empty_cleanup_failure_is_audited_and_never_reports_success(case, monkeypatch):
+    case.document.write_text("", encoding="utf-8")
+    identity = SourceProvenance.from_content("", case.metadata)
+    case.client.delete.side_effect = RuntimeError("cleanup failed")
+    async with case.factory() as session:
+        with pytest.raises(IngestionFailureError) as failure:
+            await ingest_trusted_file(session, str(case.document), case.metadata)
+    async with case.factory() as session:
+        run = await session.get(SourceIngestionRun, identity.source_version_id)
+    condition = case.client.delete.call_args.kwargs["points_selector"].filter.must[0]
+    assert failure.value.stage == run.error_stage == "legacy_cleanup"
+    assert run.status == "failed" and condition.key == "source_id"
+    assert condition.match.value == identity.source_id
+    case.client.upsert.assert_not_called()
 @pytest.mark.parametrize(
     ("method", "effects", "stage", "upserts", "deletes"),
     [
