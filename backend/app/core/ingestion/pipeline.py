@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from qdrant_client.models import (
@@ -28,14 +29,23 @@ EXTRACTORS = {
 }
 
 
+@dataclass(frozen=True)
+class PreparedIngestion:
+    points: list[PointStruct]
+    provenance: SourceProvenance
+    result: dict
+
+
 def _original_source_path(path: Path) -> str:
     resolved = path.resolve()
     repository = next((parent for parent in resolved.parents if (parent / ".git").exists()), None)
     return resolved.relative_to(repository).as_posix() if repository else str(path)
 
 
-def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
-    """Full ingestion pipeline: extract → chunk → embed → upsert to Qdrant."""
+def prepare_ingestion(
+    file_path: str, metadata_override: dict | None = None
+) -> PreparedIngestion | dict:
+    """Extract, chunk, and embed a file without mutating Qdrant."""
     path = Path(file_path)
 
     # 1. Extract
@@ -90,31 +100,7 @@ def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
             payload["university"] = file_metadata["university"]
         points.append(PointStruct(id=point_id, vector=embedding, payload=payload))
 
-    # 5. Upsert to Qdrant
-    qdrant_client.upsert(
-        collection_name=settings.qdrant_collection,
-        points=points,
-        wait=True,
-    )
-    qdrant_client.delete(
-        collection_name=settings.qdrant_collection,
-        points_selector=FilterSelector(
-            filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="source_id",
-                        match=MatchValue(value=provenance.source_id),
-                    )
-                ],
-                must_not=[
-                    HasIdCondition(has_id=[point.id for point in points])
-                ],
-            )
-        ),
-        wait=True,
-    )
-
-    return {
+    result = {
         "status": "success",
         "chunks": len(chunks),
         "file": provenance.original_source_path,
@@ -124,6 +110,45 @@ def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
         "source_version_id": provenance.source_version_id,
         "content_hash": provenance.content_hash,
     }
+    return PreparedIngestion(points=points, provenance=provenance, result=result)
+
+
+def upsert_ingestion(prepared: PreparedIngestion) -> None:
+    qdrant_client.upsert(
+        collection_name=settings.qdrant_collection,
+        points=prepared.points,
+        wait=True,
+    )
+
+
+def cleanup_ingestion(prepared: PreparedIngestion) -> None:
+    qdrant_client.delete(
+        collection_name=settings.qdrant_collection,
+        points_selector=FilterSelector(
+            filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="source_id",
+                        match=MatchValue(value=prepared.provenance.source_id),
+                    )
+                ],
+                must_not=[
+                    HasIdCondition(has_id=[point.id for point in prepared.points])
+                ],
+            )
+        ),
+        wait=True,
+    )
+
+
+def ingest_file(file_path: str, metadata_override: dict | None = None) -> dict:
+    """Full ingestion pipeline: extract → chunk → embed → upsert to Qdrant."""
+    prepared = prepare_ingestion(file_path, metadata_override)
+    if isinstance(prepared, dict):
+        return prepared
+    upsert_ingestion(prepared)
+    cleanup_ingestion(prepared)
+    return prepared.result
 
 
 def ingest_directory(directory: str, recursive: bool = True) -> list[dict]:

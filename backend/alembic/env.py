@@ -4,6 +4,7 @@ from alembic import context
 from app.config import settings
 from app.db.postgres import Base
 from app.models import Conversation, Document, Message, User  # noqa: F401
+from app.models.source_ingestion_run import SourceIngestionRun  # noqa: F401
 from app.models.trusted_source import TrustedSource  # noqa: F401
 from sqlalchemy import engine_from_config, pool
 
