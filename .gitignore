@@ -36,4 +36,6 @@ htmlcov/
 # Runtime data
 backups/
 evaluations/
+/runtime/hybrid-readiness*.json
+/backend/runtime/hybrid-readiness*.json
 knowledge_base/guias-clinicas/scraped/
